@@ -1,0 +1,90 @@
+package com.wlinsk.rd_machine.session;
+
+import com.wlinsk.rd_machine.article.ArticleCatalogService;
+import com.wlinsk.rd_machine.article.ArticleDetail;
+import com.wlinsk.rd_machine.streaming.AssistantStreamingOrchestrator;
+import com.wlinsk.rd_machine.transport.http.dto.SessionSnapshotResponse;
+import com.wlinsk.rd_machine.transport.http.dto.SubmitTurnRequest;
+import java.util.Map;
+import java.util.UUID;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.stereotype.Service;
+
+@Service
+public class SessionService {
+
+    private final ArticleCatalogService articleCatalogService;
+    private final InMemorySessionStore sessionStore;
+    private final ObjectProvider<AssistantStreamingOrchestrator> orchestratorProvider;
+
+    public SessionService(
+            ArticleCatalogService articleCatalogService,
+            InMemorySessionStore sessionStore,
+            ObjectProvider<AssistantStreamingOrchestrator> orchestratorProvider
+    ) {
+        this.articleCatalogService = articleCatalogService;
+        this.sessionStore = sessionStore;
+        this.orchestratorProvider = orchestratorProvider;
+    }
+
+    public ReadingSession createSession(String articleId) {
+        ArticleDetail article = articleCatalogService.getRequiredArticle(articleId);
+        ReadingSession session = new ReadingSession(UUID.randomUUID().toString(), article);
+        session.markGenerating();
+        sessionStore.save(session);
+        triggerAssistantTurn(session.getSessionId());
+        return session;
+    }
+
+    public boolean submitStudentTurn(String sessionId, SubmitTurnRequest request) {
+        ReadingSession session = getRequiredSession(sessionId);
+        int clientSeq = request.clientSeq() == null ? session.getCurrentTurnNo() : request.clientSeq();
+        boolean accepted = session.acceptStudentAnswer(clientSeq, request.text(), safeAsrMeta(request));
+        if (accepted) {
+            triggerAssistantTurn(sessionId);
+        }
+        return accepted;
+    }
+
+    public ReadingSession getRequiredSession(String sessionId) {
+        return sessionStore.getRequired(sessionId);
+    }
+
+    public SessionSnapshotResponse getSnapshot(String sessionId) {
+        ReadingSession session = getRequiredSession(sessionId);
+        return new SessionSnapshotResponse(
+                session.getSessionId(),
+                session.getArticle().articleId(),
+                session.getArticle().title(),
+                session.getArticle().author(),
+                session.getArticle().language(),
+                session.getStatus().name(),
+                session.getCurrentRoundNo(),
+                session.getCurrentTurnNo(),
+                session.isAwaitingStudentAnswer(),
+                session.getLastAssistantMessageText(),
+                session.getCreatedAt(),
+                session.getUpdatedAt(),
+                session.getTurns().stream()
+                        .map(turn -> new SessionSnapshotResponse.TurnSnapshot(
+                                turn.turnNo(),
+                                turn.roundNo(),
+                                turn.teacherReplyFinal(),
+                                turn.studentAnswerRaw(),
+                                turn.studentAnswerNormalized(),
+                                turn.decision().name(),
+                                turn.startedAt(),
+                                turn.completedAt()
+                        ))
+                        .toList()
+        );
+    }
+
+    private Map<String, Object> safeAsrMeta(SubmitTurnRequest request) {
+        return request.asrMeta() == null ? Map.of() : Map.copyOf(request.asrMeta());
+    }
+
+    private void triggerAssistantTurn(String sessionId) {
+        orchestratorProvider.getObject().startAssistantTurn(sessionId);
+    }
+}
