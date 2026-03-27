@@ -40,21 +40,19 @@ The `system` message is constant within a session and contains:
 - Teacher role and behavioral rules
 - Speech-friendly output constraints
 - ASR-tolerant interpretation guidance
-- Article title
-- Article author
-- Article language
-- Full article content
+- Article title, author, language, and full content wrapped in XML tags
 
 Example shape:
 
 ```text
 你是一名语言学习老师。你只能基于给定文章内容提问、评价和引导。输出必须适合语音播报，保持自然、简洁、稳定，不要使用 Markdown、HTML、emoji 或列表。每次输出控制在 3 到 5 句话以内。如果学生回答可能受到 ASR 误识别影响，请结合上下文做温和理解，不要直接指出识别错误。
 
-【文章背景】
-标题：少年閏土
-作者：魯迅
-语言：zh-HK
-内容：......
+<article>
+  <title>少年閏土</title>
+  <author>魯迅</author>
+  <language>zh-HK</language>
+  <content>......</content>
+</article>
 ```
 
 ### User Message
@@ -89,7 +87,7 @@ Each assistant message is the model's original teacher output for that round. It
 Before each LLM request, rebuild the entire message list from session state.
 
 1. Read `article`, `currentRoundNo`, and `turns` from `ReadingSession`.
-2. Create the single fixed `system` message from teacher rules and full article content.
+2. Create the single fixed `system` message from teacher rules plus the XML-wrapped article block.
 3. Append the first-round `user` message using `RoundPlanner.goalForRound(1)`.
 4. Iterate over `ReadingSession.turns` in order.
 5. For each turn, append one `assistant` message using `teacherReplyFinal`.
@@ -126,6 +124,7 @@ New responsibility:
 
 - Build the fixed `system` message
 - Reconstruct `List<LlmMessage>` for the current request from `ReadingSession` and `RoundGoal`
+- Wrap article metadata and article content in one consistent XML structure inside the `system` message
 
 Removed responsibility:
 
@@ -286,6 +285,7 @@ These can be revisited later if session length or article size grows.
 The design is complete when all of the following are true:
 
 - One session uses one stable `system` message containing the article and teacher rules
+- Article metadata and article content are wrapped in XML tags inside the `system` message
 - Each LLM request contains the real chronological chat history for that session
 - `RoundPlanner` remains the source of round-specific goals
 - Prompt construction no longer depends on recent-turn summaries or duplicated helper fields
