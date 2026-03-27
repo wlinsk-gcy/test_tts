@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -47,6 +48,7 @@ public class AliyunRealtimeTtsClient {
         private final TtsSynthesisRequest request;
         private final TtsAudioListener audioListener;
         private final LinkedBlockingQueue<TextSegment> queue = new LinkedBlockingQueue<>();
+        private final ConcurrentLinkedQueue<Integer> pendingServerCommitSegmentSeqs = new ConcurrentLinkedQueue<>();
         private final AtomicInteger currentSegmentSeq = new AtomicInteger();
         private final AtomicReference<CompletableFuture<Void>> currentResponseDone = new AtomicReference<>(new CompletableFuture<>());
         private final CompletableFuture<Void> sessionReady = new CompletableFuture<>();
@@ -127,12 +129,17 @@ public class AliyunRealtimeTtsClient {
                     if (segment.segmentSeq() < 0) {
                         break;
                     }
-                    currentSegmentSeq.set(segment.segmentSeq());
-                    CompletableFuture<Void> responseDone = new CompletableFuture<>();
-                    currentResponseDone.set(responseDone);
-                    sendAppend(segment.text());
-                    sendCommit();
-                    responseDone.join();
+                    if (request.usesClientCommit()) {
+                        currentSegmentSeq.set(segment.segmentSeq());
+                        CompletableFuture<Void> responseDone = new CompletableFuture<>();
+                        currentResponseDone.set(responseDone);
+                        sendAppend(segment.text());
+                        sendCommit();
+                        responseDone.join();
+                    } else {
+                        pendingServerCommitSegmentSeqs.offer(segment.segmentSeq());
+                        sendAppend(segment.text());
+                    }
                 }
                 sendSessionFinish();
             } catch (Exception exception) {
@@ -149,6 +156,7 @@ public class AliyunRealtimeTtsClient {
                         audioListener.onSessionReady();
                         sessionReady.complete(null);
                     }
+                    case "response.created" -> assignServerCommitSegmentSeq();
                     case "response.audio.delta" -> {
                         String delta = root.path("delta").asText();
                         if (!delta.isBlank()) {
@@ -203,6 +211,17 @@ public class AliyunRealtimeTtsClient {
                     "event_id", UUID.randomUUID().toString(),
                     "type", "session.finish"
             ));
+        }
+
+        private void assignServerCommitSegmentSeq() {
+            if (request.usesClientCommit()) {
+                return;
+            }
+            Integer segmentSeq = pendingServerCommitSegmentSeqs.poll();
+            if (segmentSeq != null) {
+                currentSegmentSeq.set(segmentSeq);
+            }
+            pendingServerCommitSegmentSeqs.clear();
         }
 
         private void sendJson(Map<String, Object> payload) {

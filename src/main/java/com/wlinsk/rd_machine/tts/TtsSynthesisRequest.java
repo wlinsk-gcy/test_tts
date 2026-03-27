@@ -7,4 +7,8 @@ public record TtsSynthesisRequest(
         int sampleRate,
         String languageType
 ) {
+
+    public boolean usesClientCommit() {
+        return "commit".equalsIgnoreCase(mode);
+    }
 }

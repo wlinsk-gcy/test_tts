@@ -73,7 +73,7 @@ public class AssistantStreamingOrchestrator {
         String systemPrompt = promptBuilder.buildSystemPrompt(promptContext);
         String userPrompt = promptBuilder.buildUserPrompt(promptContext);
         StringBuilder fullText = new StringBuilder();
-        TextSegmenter textSegmenter = new TextSegmenter();
+        TextSegmenter textSegmenter = ttsService.createTextSegmenter();
         TtsStreamSession ttsStreamSession = null;
         AtomicBoolean sawFirstTextDelta = new AtomicBoolean();
         AtomicBoolean sawFirstAudioChunk = new AtomicBoolean();

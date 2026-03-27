@@ -6,22 +6,27 @@ import java.util.List;
 
 public class TextSegmenter {
 
-    private static final int MIN_LENGTH = 12;
-    private static final int MAX_LENGTH = 28;
-    private static final long MAX_WAIT_MILLIS = 250L;
-    private static final String PUNCTUATION = "。！？!?；;，,";
-
     private final Clock clock;
+    private final Settings settings;
     private final StringBuilder buffer = new StringBuilder();
     private int nextSequence = 1;
     private long lastFlushAt;
 
     public TextSegmenter() {
-        this(Clock.systemUTC());
+        this(Clock.systemUTC(), Settings.legacy());
+    }
+
+    public TextSegmenter(Settings settings) {
+        this(Clock.systemUTC(), settings);
     }
 
     TextSegmenter(Clock clock) {
+        this(clock, Settings.legacy());
+    }
+
+    TextSegmenter(Clock clock, Settings settings) {
         this.clock = clock;
+        this.settings = settings;
         this.lastFlushAt = clock.millis();
     }
 
@@ -38,7 +43,8 @@ public class TextSegmenter {
             }
             segments.add(flush(splitIndex));
         }
-        if (buffer.length() >= MAX_LENGTH || (buffer.length() >= MIN_LENGTH && clock.millis() - lastFlushAt >= MAX_WAIT_MILLIS)) {
+        if (buffer.length() >= settings.maxLength()
+                || (buffer.length() >= settings.minLength() && clock.millis() - lastFlushAt >= settings.maxWaitMillis())) {
             segments.add(flush(buffer.length()));
         }
         return segments;
@@ -52,11 +58,19 @@ public class TextSegmenter {
     }
 
     private int findSplitIndex() {
-        if (buffer.length() < MIN_LENGTH) {
+        int hardSplitIndex = findSplitIndex(settings.hardPunctuation());
+        if (hardSplitIndex > 0) {
+            return hardSplitIndex;
+        }
+        return findSplitIndex(settings.softPunctuation());
+    }
+
+    private int findSplitIndex(String punctuation) {
+        if (buffer.length() < settings.minLength() || punctuation == null || punctuation.isBlank()) {
             return -1;
         }
         for (int index = buffer.length() - 1; index >= 0; index--) {
-            if (PUNCTUATION.indexOf(buffer.charAt(index)) >= 0) {
+            if (punctuation.indexOf(buffer.charAt(index)) >= 0 && index + 1 >= settings.minLength()) {
                 return index + 1;
             }
         }
@@ -68,5 +82,36 @@ public class TextSegmenter {
         buffer.delete(0, length);
         lastFlushAt = clock.millis();
         return new TextSegment(nextSequence++, text);
+    }
+
+    public record Settings(
+            int minLength,
+            int maxLength,
+            long maxWaitMillis,
+            String softPunctuation,
+            String hardPunctuation
+    ) {
+
+        public Settings {
+            if (minLength < 1) {
+                throw new IllegalArgumentException("minLength must be positive");
+            }
+            if (maxLength < minLength) {
+                throw new IllegalArgumentException("maxLength must be >= minLength");
+            }
+            if (maxWaitMillis < 0) {
+                throw new IllegalArgumentException("maxWaitMillis must be >= 0");
+            }
+        }
+
+        public static Settings legacy() {
+            return new Settings(
+                    12,
+                    28,
+                    250L,
+                    ",\uFF0C;\uFF1B",
+                    ".!?\u3002\uFF01\uFF1F"
+            );
+        }
     }
 }

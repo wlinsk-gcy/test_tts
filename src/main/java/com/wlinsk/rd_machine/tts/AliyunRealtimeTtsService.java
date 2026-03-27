@@ -1,6 +1,7 @@
 package com.wlinsk.rd_machine.tts;
 
 import com.wlinsk.rd_machine.config.AiTtsProperties;
+import com.wlinsk.rd_machine.streaming.TextSegmenter;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -23,7 +24,7 @@ public class AliyunRealtimeTtsService {
     public TtsStreamSession openSession(String articleLanguage, TtsAudioListener audioListener) {
         TtsSynthesisRequest request = new TtsSynthesisRequest(
                 properties.getVoice(),
-                properties.getMode(),
+                properties.normalizedMode(),
                 properties.getResponseFormat(),
                 properties.getSampleRate(),
                 articleLanguage != null && articleLanguage.startsWith("en") ? "English" : "Chinese"
@@ -37,5 +38,19 @@ public class AliyunRealtimeTtsService {
 
     public String responseFormat() {
         return properties.getResponseFormat();
+    }
+
+    public TextSegmenter createTextSegmenter() {
+        if (!properties.usesClientCommit()) {
+            return new TextSegmenter();
+        }
+        AiTtsProperties.Commit commit = properties.getCommit();
+        return new TextSegmenter(new TextSegmenter.Settings(
+                commit.getMinLength(),
+                commit.getMaxLength(),
+                commit.getMaxWaitMs(),
+                commit.getSoftPunctuation(),
+                commit.getHardPunctuation()
+        ));
     }
 }
