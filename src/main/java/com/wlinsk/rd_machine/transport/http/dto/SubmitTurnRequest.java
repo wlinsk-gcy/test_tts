@@ -4,7 +4,7 @@ import java.util.Map;
 
 public record SubmitTurnRequest(
         Integer turnNo,
-        Integer clientSeq,
+        Long clientSeq,
         String text,
         Map<String, Object> asrMeta
 ) {

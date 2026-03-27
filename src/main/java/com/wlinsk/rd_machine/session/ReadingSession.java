@@ -21,7 +21,7 @@ public class ReadingSession {
     private String pendingStudentAnswerRaw;
     private String pendingStudentAnswerNormalized;
     private Map<String, Object> pendingAsrMeta;
-    private Integer lastClientSeq;
+    private Long lastClientSeq;
     private Instant updatedAt;
 
     public ReadingSession(String sessionId, ArticleDetail article) {
@@ -85,7 +85,7 @@ public class ReadingSession {
         return pendingAsrMeta;
     }
 
-    public synchronized Integer getLastClientSeq() {
+    public synchronized Long getLastClientSeq() {
         return lastClientSeq;
     }
 
@@ -103,7 +103,7 @@ public class ReadingSession {
         touch();
     }
 
-    public synchronized boolean acceptStudentAnswer(int clientSeq, String rawText, Map<String, Object> asrMeta) {
+    public synchronized boolean acceptStudentAnswer(long clientSeq, String rawText, Map<String, Object> asrMeta) {
         if (lastClientSeq != null && lastClientSeq == clientSeq) {
             return false;
         }

@@ -38,7 +38,7 @@ public class SessionService {
 
     public boolean submitStudentTurn(String sessionId, SubmitTurnRequest request) {
         ReadingSession session = getRequiredSession(sessionId);
-        int clientSeq = request.clientSeq() == null ? session.getCurrentTurnNo() : request.clientSeq();
+        long clientSeq = request.clientSeq() == null ? session.getCurrentTurnNo() : request.clientSeq();
         boolean accepted = session.acceptStudentAnswer(clientSeq, request.text(), safeAsrMeta(request));
         if (accepted) {
             triggerAssistantTurn(sessionId);
