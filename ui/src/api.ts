@@ -47,6 +47,12 @@ export function submitTurn(sessionId: string, payload: SubmitTurnRequest): Promi
   });
 }
 
+export function closeSession(sessionId: string): Promise<SessionSnapshotResponse> {
+  return request<SessionSnapshotResponse>(`/api/sessions/${sessionId}/close`, {
+    method: "POST"
+  });
+}
+
 export function fetchSessionSnapshot(sessionId: string): Promise<SessionSnapshotResponse> {
   return request<SessionSnapshotResponse>(`/api/sessions/${sessionId}`, { method: "GET" });
 }

@@ -76,12 +76,18 @@ public class ReadingSession {
     }
 
     public synchronized void markGenerating() {
+        if (status == SessionStatus.CLOSED) {
+            return;
+        }
         this.status = SessionStatus.GENERATING;
         this.awaitingStudentAnswer = false;
         touch();
     }
 
     public synchronized boolean acceptStudentAnswer(long clientSeq, String rawText, Map<String, Object> asrMeta) {
+        if (status == SessionStatus.CLOSED) {
+            throw new IllegalStateException("Session is closed");
+        }
         if (lastClientSeq != null && lastClientSeq == clientSeq) {
             return false;
         }
@@ -101,7 +107,7 @@ public class ReadingSession {
                 Instant.now()
         ));
         lastClientSeq = clientSeq;
-        currentRoundNo = Math.min(currentRoundNo + 1, 5);
+        currentRoundNo = currentRoundNo + 1;
         currentTurnNo = currentTurnNo + 1;
         status = SessionStatus.GENERATING;
         awaitingStudentAnswer = false;
@@ -110,30 +116,30 @@ public class ReadingSession {
     }
 
     public synchronized void markAssistantTurnCompleted(String assistantText) {
-        this.lastAssistantMessageText = assistantText;
-        if (currentRoundNo >= 5) {
-            turns.add(new ReadingTurn(
-                    currentTurnNo,
-                    currentRoundNo,
-                    assistantText,
-                    null,
-                    null,
-                    Map.of(),
-                    TurnDecision.FINISH,
-                    updatedAt,
-                    Instant.now()
-            ));
-            status = SessionStatus.COMPLETED;
-            awaitingStudentAnswer = false;
-        } else {
-            status = SessionStatus.WAITING_STUDENT;
-            awaitingStudentAnswer = true;
+        if (status == SessionStatus.CLOSED) {
+            return;
         }
+        this.lastAssistantMessageText = assistantText;
+        status = SessionStatus.WAITING_STUDENT;
+        awaitingStudentAnswer = true;
         touch();
     }
 
     public synchronized void markFailed() {
+        if (status == SessionStatus.CLOSED) {
+            return;
+        }
         this.status = SessionStatus.FAILED;
+        this.awaitingStudentAnswer = false;
+        touch();
+    }
+
+    public synchronized boolean isClosed() {
+        return status == SessionStatus.CLOSED;
+    }
+
+    public synchronized void close() {
+        this.status = SessionStatus.CLOSED;
         this.awaitingStudentAnswer = false;
         touch();
     }

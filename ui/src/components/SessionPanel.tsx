@@ -9,6 +9,8 @@ type Props = {
   metrics: MetricsState;
   queuedChunks: number;
   queuedBytes: number;
+  closeDisabled: boolean;
+  onClose: () => void;
 };
 
 function metricDelta(from?: number, to?: number): string {
@@ -18,12 +20,28 @@ function metricDelta(from?: number, to?: number): string {
   return `${to - from} ms`;
 }
 
-export function SessionPanel({ sessionId, roundNo, status, socketState, lastError, metrics, queuedChunks, queuedBytes }: Props) {
+export function SessionPanel({
+  sessionId,
+  roundNo,
+  status,
+  socketState,
+  lastError,
+  metrics,
+  queuedChunks,
+  queuedBytes,
+  closeDisabled,
+  onClose
+}: Props) {
   return (
     <section className="panel">
       <div className="panel-header">
         <h2>Session</h2>
-        <span>{socketState}</span>
+        <div>
+          <button className="ghost-button" type="button" disabled={closeDisabled} onClick={onClose}>
+            End Session
+          </button>
+          <span>{socketState}</span>
+        </div>
       </div>
       <div className="facts-grid">
         <div><label>Session</label><strong>{sessionId ?? "--"}</strong></div>

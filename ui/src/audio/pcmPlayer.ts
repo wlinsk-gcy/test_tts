@@ -27,6 +27,7 @@ export class PcmPlayer {
   private nextPlaybackTime = 0;
   private queuedChunks = 0;
   private queuedBytes = 0;
+  private activeSources = new Set<AudioBufferSourceNode>();
 
   async ensureReady(): Promise<void> {
     if (!this.audioContext) {
@@ -55,10 +56,25 @@ export class PcmPlayer {
     this.nextPlaybackTime = startAt + buffer.duration;
     this.queuedChunks += 1;
     this.queuedBytes += pcm.byteLength;
+    this.activeSources.add(source);
     source.addEventListener("ended", () => {
+      this.activeSources.delete(source);
       this.queuedChunks = Math.max(0, this.queuedChunks - 1);
       this.queuedBytes = Math.max(0, this.queuedBytes - pcm.byteLength);
     });
+  }
+
+  reset(): void {
+    this.activeSources.forEach((source) => {
+      try {
+        source.stop();
+      } catch {
+      }
+    });
+    this.activeSources.clear();
+    this.queuedChunks = 0;
+    this.queuedBytes = 0;
+    this.nextPlaybackTime = this.audioContext?.currentTime ?? 0;
   }
 
   getStats(): PcmPlayerStats {

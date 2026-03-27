@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { apiBaseUrl, createSession, fetchArticles, fetchSessionSnapshot, submitTurn } from "./api";
+import { apiBaseUrl, closeSession, createSession, fetchArticles, fetchSessionSnapshot, submitTurn } from "./api";
 import { PcmPlayer } from "./audio/pcmPlayer";
 import { ArticleList } from "./components/ArticleList";
 import { AssistantStreamPanel } from "./components/AssistantStreamPanel";
@@ -32,6 +32,7 @@ export default function App() {
   const [playerVersion, setPlayerVersion] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
   const playerRef = useRef(new PcmPlayer());
+  const terminalSessionRef = useRef(false);
 
   useEffect(() => {
     void loadArticles();
@@ -56,7 +57,9 @@ export default function App() {
 
   async function handleSelectArticle(articleId: string) {
     try {
+      terminalSessionRef.current = false;
       setActiveArticleId(articleId);
+      playerRef.current.reset();
       await playerRef.current.ensureReady();
       setPlayerVersion((value) => value + 1);
       setTextStream("");
@@ -105,6 +108,9 @@ export default function App() {
   }
 
   async function handleAssistantEvent(event: AssistantEvent) {
+    if (terminalSessionRef.current) {
+      return;
+    }
     const now = Date.now();
     switch (event.type) {
       case "assistant.debug.timing": {
@@ -175,6 +181,7 @@ export default function App() {
         pushTimeline(setTimeline, { at: now, label: event.type, detail: JSON.stringify(event.data) });
         if (sessionId) {
           const snapshot = await fetchSessionSnapshot(sessionId);
+          terminalSessionRef.current = snapshot.status === "CLOSED" || snapshot.status === "FAILED";
           setStatus(snapshot.status);
           setRoundNo(snapshot.currentRoundNo);
         }
@@ -191,7 +198,7 @@ export default function App() {
   }
 
   async function handleSubmitStudentTurn() {
-    if (!sessionId || !studentText.trim()) {
+    if (!sessionId || !studentText.trim() || terminalSessionRef.current) {
       return;
     }
     try {
@@ -213,7 +220,32 @@ export default function App() {
     }
   }
 
+  async function handleCloseSession() {
+    if (!sessionId || terminalSessionRef.current) {
+      return;
+    }
+    try {
+      terminalSessionRef.current = true;
+      setLastError(null);
+      playerRef.current.reset();
+      setPlayerVersion((value) => value + 1);
+      setStudentText("");
+      pushTimeline(setTimeline, { at: Date.now(), label: "session.close.start", detail: sessionId });
+      const snapshot = await closeSession(sessionId);
+      socketRef.current?.close();
+      socketRef.current = null;
+      setStatus(snapshot.status);
+      setRoundNo(snapshot.currentRoundNo);
+      pushTimeline(setTimeline, { at: Date.now(), label: "session.closed", detail: sessionId });
+    } catch (error) {
+      terminalSessionRef.current = false;
+      setLastError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   const playerStats = playerRef.current.getStats();
+  const sessionClosed = status === "CLOSED" || status === "FAILED";
+  const studentInputDisabled = !sessionId || status !== "WAITING_STUDENT";
   void playerVersion;
 
   return (
@@ -243,10 +275,12 @@ export default function App() {
           metrics={metrics}
           queuedChunks={playerStats.queuedChunks}
           queuedBytes={playerStats.queuedBytes}
+          closeDisabled={!sessionId || sessionClosed}
+          onClose={() => { void handleCloseSession(); }}
         />
         <StudentInputPanel
           value={studentText}
-          disabled={!sessionId}
+          disabled={studentInputDisabled}
           onChange={setStudentText}
           onSubmit={() => { void handleSubmitStudentTurn(); }}
         />

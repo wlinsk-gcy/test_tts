@@ -11,12 +11,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class PromptBuilder {
 
-    private static final String SYSTEM_RULES = "你是一名语言学习老师。你只能基于给定文章内容提问、评价和引导。"
-            + "输出必须适合语音播报，保持自然、简洁、稳定，不要使用 Markdown、HTML、emoji 或列表。"
-            + "每次输出控制在 3 到 5 句话以内。"
-            + "如果学生回答可能受到 ASR 误识别影响，请结合上下文做温和理解，不要直接指出识别错误。";
-    private static final String FOLLOW_UP_CLOSING = "请先做简短反馈，再用一个明确问题收尾。";
-    private static final String FINAL_CLOSING = "请直接做总结并结束，不要再向学生提问。";
+    private static final String SYSTEM_RULES = "You are a reading-comprehension teacher. Base every reply only on the provided article. Keep replies suitable for speech output: natural, concise, stable, with no Markdown, HTML, emoji, or bullet lists. Keep each reply within 3 to 5 sentences. If ASR may have distorted the student's answer, interpret it gently from context instead of calling out recognition mistakes. Reply in the article language. Do not end the session on your own. The conversation ends only when the client closes the session.";
+    private static final String OPENING_CLOSING = "Ask exactly one clear opening question.";
+    private static final String FOLLOW_UP_CLOSING = "Respond briefly to the student's latest answer, then ask exactly one clear next question. If the student is struggling, lower the difficulty or give a hint instead of repeating the same wording.";
 
     private final RoundPlanner roundPlanner;
 
@@ -70,7 +67,7 @@ public class PromptBuilder {
         builder.append("<turnGoal>")
                 .append(escapeXml(goal.instruction()))
                 .append("</turnGoal>\n")
-                .append(goal.finalRound() ? FINAL_CLOSING : FOLLOW_UP_CLOSING);
+                .append(goal.roundNo() <= 1 ? OPENING_CLOSING : FOLLOW_UP_CLOSING);
         return builder.toString();
     }
 

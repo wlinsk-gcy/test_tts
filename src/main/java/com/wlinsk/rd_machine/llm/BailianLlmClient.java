@@ -11,6 +11,8 @@ import com.openai.models.chat.completions.ChatCompletionSystemMessageParam;
 import com.openai.models.chat.completions.ChatCompletionUserMessageParam;
 import com.wlinsk.rd_machine.config.AiLlmProperties;
 import java.time.Duration;
+import java.util.concurrent.CancellationException;
+import java.util.function.BooleanSupplier;
 import java.util.List;
 import org.springframework.stereotype.Component;
 
@@ -25,7 +27,7 @@ public class BailianLlmClient {
         this.llmService = llmService;
     }
 
-    public void streamChatCompletion(List<LlmMessage> messages, LlmDeltaListener listener) {
+    public void streamChatCompletion(List<LlmMessage> messages, LlmDeltaListener listener, BooleanSupplier cancelled) {
         ChatCompletionCreateParams params = buildParams(messages);
         OpenAIClient openAIClient = OpenAIOkHttpClient.builder()
                 .apiKey(properties.getApiKey())
@@ -37,11 +39,22 @@ public class BailianLlmClient {
                     .flatMap(chunk -> chunk.choices().stream())
                     .flatMap(choice -> choice.delta().content().stream())
                     .filter(delta -> !delta.isBlank())
-                    .forEach(listener::onDelta);
-            listener.onComplete();
+                    .forEach(delta -> {
+                        if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
+                            throw new CancellationException("Session closed");
+                        }
+                        listener.onDelta(delta);
+                    });
+            if (!cancelled.getAsBoolean() && !Thread.currentThread().isInterrupted()) {
+                listener.onComplete();
+            }
+        } catch (CancellationException ignored) {
+            Thread.interrupted();
         } catch (Exception exception) {
-            listener.onError(exception);
-            throw exception;
+            if (!cancelled.getAsBoolean()) {
+                listener.onError(exception);
+                throw exception;
+            }
         }
     }
 

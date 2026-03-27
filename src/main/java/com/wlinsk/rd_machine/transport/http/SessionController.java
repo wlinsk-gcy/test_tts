@@ -51,6 +51,11 @@ public class SessionController {
         );
     }
 
+    @PostMapping("/{sessionId}/close")
+    public SessionSnapshotResponse closeSession(@PathVariable String sessionId) {
+        return sessionService.closeSession(sessionId);
+    }
+
     @GetMapping("/{sessionId}")
     public SessionSnapshotResponse getSnapshot(@PathVariable String sessionId) {
         return sessionService.getSnapshot(sessionId);
