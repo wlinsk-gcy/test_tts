@@ -1,6 +1,7 @@
 package com.wlinsk.rd_machine.streaming;
 
 import com.wlinsk.rd_machine.llm.BailianLlmClient;
+import com.wlinsk.rd_machine.llm.LlmMessage;
 import com.wlinsk.rd_machine.llm.LlmDeltaListener;
 import com.wlinsk.rd_machine.prompt.PromptBuilder;
 import com.wlinsk.rd_machine.prompt.PromptContext;
@@ -70,8 +71,7 @@ public class AssistantStreamingOrchestrator {
         publishTiming(context, "turn.start", turnStartedAtMs, turnStartedAtNs);
         RoundGoal roundGoal = roundPlanner.goalForRound(roundNo);
         PromptContext promptContext = new PromptContext(session, roundGoal);
-        String systemPrompt = promptBuilder.buildSystemPrompt(promptContext);
-        String userPrompt = promptBuilder.buildUserPrompt(promptContext);
+        List<LlmMessage> messages = promptBuilder.buildMessages(promptContext);
         StringBuilder fullText = new StringBuilder();
         TextSegmenter textSegmenter = ttsService.createTextSegmenter();
         TtsStreamSession ttsStreamSession = null;
@@ -111,7 +111,7 @@ public class AssistantStreamingOrchestrator {
 
             TtsStreamSession finalTtsStreamSession = ttsStreamSession;
             publishTiming(context, "llm.request.start", System.currentTimeMillis(), turnStartedAtNs);
-            llmClient.streamChatCompletion(systemPrompt, userPrompt, new LlmDeltaListener() {
+            llmClient.streamChatCompletion(messages, new LlmDeltaListener() {
                 @Override
                 public void onDelta(String delta) {
                     if (sawFirstTextDelta.compareAndSet(false, true)) {

@@ -17,10 +17,6 @@ public class ReadingSession {
     private int currentTurnNo;
     private boolean awaitingStudentAnswer;
     private String lastAssistantMessageText;
-    private String summaryContext;
-    private String pendingStudentAnswerRaw;
-    private String pendingStudentAnswerNormalized;
-    private Map<String, Object> pendingAsrMeta;
     private Long lastClientSeq;
     private Instant updatedAt;
 
@@ -33,8 +29,6 @@ public class ReadingSession {
         this.currentRoundNo = 1;
         this.currentTurnNo = 1;
         this.awaitingStudentAnswer = false;
-        this.summaryContext = "";
-        this.pendingAsrMeta = Map.of();
     }
 
     public synchronized String getSessionId() {
@@ -67,22 +61,6 @@ public class ReadingSession {
 
     public synchronized String getLastAssistantMessageText() {
         return lastAssistantMessageText;
-    }
-
-    public synchronized String getSummaryContext() {
-        return summaryContext;
-    }
-
-    public synchronized String getPendingStudentAnswerRaw() {
-        return pendingStudentAnswerRaw;
-    }
-
-    public synchronized String getPendingStudentAnswerNormalized() {
-        return pendingStudentAnswerNormalized;
-    }
-
-    public synchronized Map<String, Object> getPendingAsrMeta() {
-        return pendingAsrMeta;
     }
 
     public synchronized Long getLastClientSeq() {
@@ -122,24 +100,17 @@ public class ReadingSession {
                 updatedAt,
                 Instant.now()
         ));
-        pendingStudentAnswerRaw = rawText;
-        pendingStudentAnswerNormalized = normalized;
-        pendingAsrMeta = asrMeta == null ? Map.of() : Map.copyOf(asrMeta);
         lastClientSeq = clientSeq;
         currentRoundNo = Math.min(currentRoundNo + 1, 5);
         currentTurnNo = currentTurnNo + 1;
         status = SessionStatus.GENERATING;
         awaitingStudentAnswer = false;
-        summaryContext = buildRecentTurnsSummary();
         touch();
         return true;
     }
 
     public synchronized void markAssistantTurnCompleted(String assistantText) {
         this.lastAssistantMessageText = assistantText;
-        this.pendingStudentAnswerRaw = null;
-        this.pendingStudentAnswerNormalized = null;
-        this.pendingAsrMeta = Map.of();
         if (currentRoundNo >= 5) {
             turns.add(new ReadingTurn(
                     currentTurnNo,
@@ -172,29 +143,6 @@ public class ReadingSession {
             return "";
         }
         return rawText.trim().replaceAll("\\s+", " ");
-    }
-
-    private String buildRecentTurnsSummary() {
-        if (turns.isEmpty()) {
-            return "";
-        }
-        int start = Math.max(0, turns.size() - 3);
-        StringBuilder builder = new StringBuilder();
-        for (int i = start; i < turns.size(); i++) {
-            ReadingTurn turn = turns.get(i);
-            builder.append("Round ")
-                    .append(turn.roundNo())
-                    .append(": Teacher=")
-                    .append(nullToEmpty(turn.teacherReplyFinal()))
-                    .append(" | Student=")
-                    .append(nullToEmpty(turn.studentAnswerNormalized()))
-                    .append('\n');
-        }
-        return builder.toString();
-    }
-
-    private String nullToEmpty(String value) {
-        return value == null ? "" : value;
     }
 
     private void touch() {

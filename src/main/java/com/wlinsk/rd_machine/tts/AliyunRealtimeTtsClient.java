@@ -37,6 +37,7 @@ public class AliyunRealtimeTtsClient {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.executorService = executorService;
+
     }
 
     public TtsStreamSession openSession(TtsSynthesisRequest request, TtsAudioListener audioListener) {
