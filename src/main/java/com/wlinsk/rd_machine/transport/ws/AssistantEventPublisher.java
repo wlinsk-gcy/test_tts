@@ -2,6 +2,7 @@ package com.wlinsk.rd_machine.transport.ws;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.wlinsk.rd_machine.logging.WebSocketAccessLogHelper;
 import com.wlinsk.rd_machine.streaming.StreamingSessionContext;
 import java.util.Base64;
 import java.util.List;
@@ -15,10 +16,16 @@ public class AssistantEventPublisher {
 
     private final ObjectMapper objectMapper;
     private final SessionConnectionRegistry connectionRegistry;
+    private final WebSocketAccessLogHelper accessLogHelper;
 
-    public AssistantEventPublisher(ObjectMapper objectMapper, SessionConnectionRegistry connectionRegistry) {
+    public AssistantEventPublisher(
+            ObjectMapper objectMapper,
+            SessionConnectionRegistry connectionRegistry,
+            WebSocketAccessLogHelper accessLogHelper
+    ) {
         this.objectMapper = objectMapper;
         this.connectionRegistry = connectionRegistry;
+        this.accessLogHelper = accessLogHelper;
     }
 
     public void publishTextDelta(StreamingSessionContext context, String delta) {
@@ -85,6 +92,7 @@ public class AssistantEventPublisher {
     private void publish(AssistantEvent event) {
         String payload = serialize(event);
         List<WebSocketSession> connections = connectionRegistry.getConnections(event.sessionId());
+        accessLogHelper.logAssistantOutbound(event, connections.size());
         for (WebSocketSession connection : connections) {
             if (!connection.isOpen()) {
                 continue;

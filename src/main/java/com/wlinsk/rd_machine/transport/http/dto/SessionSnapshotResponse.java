@@ -5,7 +5,6 @@ import java.util.List;
 
 public record SessionSnapshotResponse(
         String sessionId,
-        String articleId,
         String title,
         String author,
         String language,

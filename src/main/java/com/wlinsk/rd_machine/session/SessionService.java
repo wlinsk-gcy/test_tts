@@ -33,8 +33,8 @@ public class SessionService {
         this.orchestratorProvider = orchestratorProvider;
     }
 
-    public ReadingSession createSession(String articleId) {
-        ArticleDetail article = articleCatalogService.getRequiredArticle(articleId);
+    public ReadingSession createSession(String title, String author, String language, String content) {
+        ArticleDetail article = new ArticleDetail(null, title, author, language, content);
         ReadingSession session = new ReadingSession(UUID.randomUUID().toString(), article);
         session.markGenerating();
         sessionStore.save(session);
@@ -79,7 +79,6 @@ public class SessionService {
         ReadingSession session = getRequiredSession(sessionId);
         return new SessionSnapshotResponse(
                 session.getSessionId(),
-                session.getArticle().articleId(),
                 session.getArticle().title(),
                 session.getArticle().author(),
                 session.getArticle().language(),

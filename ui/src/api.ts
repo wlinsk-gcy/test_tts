@@ -1,6 +1,7 @@
-import type {
+﻿import type {
   ApiResult,
   ArticleSummary,
+  CreateSessionPayload,
   CreateSessionResponse,
   SessionSnapshotResponse,
   SubmitTurnRequest,
@@ -42,10 +43,10 @@ export function fetchArticles(): Promise<ArticleSummary[]> {
   return request<ArticleSummary[]>("/api/articles", { method: "GET" });
 }
 
-export function createSession(articleId: string): Promise<CreateSessionResponse> {
+export function createSession(payload: CreateSessionPayload): Promise<CreateSessionResponse> {
   return request<CreateSessionResponse>("/api/sessions", {
     method: "POST",
-    body: JSON.stringify({ articleId })
+    body: JSON.stringify(payload)
   });
 }
 

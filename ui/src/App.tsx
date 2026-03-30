@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import { apiBaseUrl, closeSession, createSession, fetchArticles, fetchSessionSnapshot, submitTurn } from "./api";
+﻿import { useEffect, useRef, useState } from "react";
+import { DEBUG_ARTICLES } from "./articles";
+import { apiBaseUrl, closeSession, createSession, fetchSessionSnapshot, submitTurn } from "./api";
 import { PcmPlayer } from "./audio/pcmPlayer";
 import { ArticleList } from "./components/ArticleList";
 import { AssistantStreamPanel } from "./components/AssistantStreamPanel";
 import { EventTimeline } from "./components/EventTimeline";
 import { SessionPanel } from "./components/SessionPanel";
 import { StudentInputPanel } from "./components/StudentInputPanel";
-import type { ArticleSummary, AssistantEvent, MetricsState, TimelineEntry } from "./types";
+import type { AssistantEvent, DebugArticle, MetricsState, TimelineEntry } from "./types";
 import { openSessionSocket } from "./ws";
 
 const MAX_TIMELINE = 120;
@@ -16,8 +17,6 @@ function pushTimeline(setter: React.Dispatch<React.SetStateAction<TimelineEntry[
 }
 
 export default function App() {
-  const [articles, setArticles] = useState<ArticleSummary[]>([]);
-  const [loadingArticles, setLoadingArticles] = useState(false);
   const [activeArticleId, setActiveArticleId] = useState<string>();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
@@ -33,32 +32,18 @@ export default function App() {
   const socketRef = useRef<WebSocket | null>(null);
   const playerRef = useRef(new PcmPlayer());
   const terminalSessionRef = useRef(false);
+  const articles = DEBUG_ARTICLES;
 
   useEffect(() => {
-    void loadArticles();
     return () => {
       socketRef.current?.close();
     };
   }, []);
 
-  async function loadArticles() {
-    try {
-      setLoadingArticles(true);
-      setLastError(null);
-      const loaded = await fetchArticles();
-      setArticles(loaded);
-      pushTimeline(setTimeline, { at: Date.now(), label: "articles.loaded", detail: `${loaded.length} articles` });
-    } catch (error) {
-      setLastError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setLoadingArticles(false);
-    }
-  }
-
-  async function handleSelectArticle(articleId: string) {
+  async function handleSelectArticle(article: DebugArticle) {
     try {
       terminalSessionRef.current = false;
-      setActiveArticleId(articleId);
+      setActiveArticleId(article.id);
       playerRef.current.reset();
       await playerRef.current.ensureReady();
       setPlayerVersion((value) => value + 1);
@@ -69,8 +54,8 @@ export default function App() {
       setLastError(null);
       socketRef.current?.close();
       setSocketState("creating-session");
-      pushTimeline(setTimeline, { at: Date.now(), label: "session.create.start", detail: articleId });
-      const created = await createSession(articleId);
+      pushTimeline(setTimeline, { at: Date.now(), label: "session.create.start", detail: article.title });
+      const created = await createSession(article);
       setSessionId(created.sessionId);
       setStatus(created.status);
       setRoundNo(created.currentRoundNo);
@@ -262,9 +247,8 @@ export default function App() {
       <div className="dashboard-grid">
         <ArticleList
           articles={articles}
-          loading={loadingArticles}
           activeArticleId={activeArticleId}
-          onSelect={(articleId) => { void handleSelectArticle(articleId); }}
+          onSelect={(article) => { void handleSelectArticle(article); }}
         />
         <SessionPanel
           sessionId={sessionId}

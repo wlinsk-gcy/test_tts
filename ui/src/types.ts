@@ -1,9 +1,19 @@
-export type ArticleSummary = {
+﻿export type ArticleSummary = {
   articleId: string;
   title: string;
   author: string;
   language: string;
 };
+
+export type DebugArticle = {
+  id: string;
+  title: string;
+  author: string;
+  language: string;
+  content: string;
+};
+
+export type CreateSessionPayload = Pick<DebugArticle, "title" | "author" | "language" | "content">;
 
 export type ApiResult<T> = {
   rspCd: string;
@@ -39,7 +49,6 @@ export type SubmitTurnResponse = {
 
 export type SessionSnapshotResponse = {
   sessionId: string;
-  articleId: string;
   title: string;
   author: string;
   language: string;

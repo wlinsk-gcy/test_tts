@@ -1,25 +1,24 @@
-import type { ArticleSummary } from "../types";
+﻿import type { DebugArticle } from "../types";
 
 type Props = {
-  articles: ArticleSummary[];
-  loading: boolean;
+  articles: DebugArticle[];
   activeArticleId?: string;
-  onSelect: (articleId: string) => void;
+  onSelect: (article: DebugArticle) => void;
 };
 
-export function ArticleList({ articles, loading, activeArticleId, onSelect }: Props) {
+export function ArticleList({ articles, activeArticleId, onSelect }: Props) {
   return (
     <section className="panel">
       <div className="panel-header">
         <h2>Articles</h2>
-        <span>{loading ? "Loading..." : `${articles.length} loaded`}</span>
+        <span>{`${articles.length} local`}</span>
       </div>
       <div className="article-grid">
         {articles.map((article) => (
           <button
-            key={article.articleId}
-            className={activeArticleId === article.articleId ? "article-button active" : "article-button"}
-            onClick={() => onSelect(article.articleId)}
+            key={article.id}
+            className={activeArticleId === article.id ? "article-button active" : "article-button"}
+            onClick={() => onSelect(article)}
             type="button"
           >
             <strong>{article.title}</strong>

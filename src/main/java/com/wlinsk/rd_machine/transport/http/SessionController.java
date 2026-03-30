@@ -20,7 +20,12 @@ public class SessionController {
 
     @PostMapping
     public Result<CreateSessionResponse> createSession(@RequestBody CreateSessionRequest request) {
-        ReadingSession session = sessionService.createSession(request.articleId());
+        ReadingSession session = sessionService.createSession(
+                request.title(),
+                request.author(),
+                request.language(),
+                request.content()
+        );
         CreateSessionResponse response = new CreateSessionResponse(
                 session.getSessionId(),
                 session.getStatus().name(),

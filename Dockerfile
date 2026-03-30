@@ -11,6 +11,9 @@ FROM eclipse-temurin:21-jre AS runtime
 WORKDIR /app
 
 COPY --from=build /workspace/target/*.jar /app/app.jar
+RUN mkdir -p /app/logs
+
+ENV RD_LOG_PATH=/app/logs
 
 EXPOSE 8080
 
