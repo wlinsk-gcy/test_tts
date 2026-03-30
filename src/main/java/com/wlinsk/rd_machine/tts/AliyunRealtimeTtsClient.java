@@ -13,6 +13,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -54,6 +55,7 @@ public class AliyunRealtimeTtsClient {
         private final AtomicReference<CompletableFuture<Void>> currentResponseDone = new AtomicReference<>(new CompletableFuture<>());
         private final CompletableFuture<Void> sessionReady = new CompletableFuture<>();
         private final CompletableFuture<Void> sessionFinished = new CompletableFuture<>();
+        private final CompletableFuture<WebSocket> webSocketFuture;
         private final StringBuilder textBuffer = new StringBuilder();
         private volatile WebSocket webSocket;
         private volatile boolean finished;
@@ -61,11 +63,17 @@ public class AliyunRealtimeTtsClient {
         private RealtimeTtsStreamSession(TtsSynthesisRequest request, TtsAudioListener audioListener) {
             this.request = request;
             this.audioListener = audioListener;
-            this.webSocket = httpClient.newWebSocketBuilder()
+            this.webSocketFuture = httpClient.newWebSocketBuilder()
                     .header("Authorization", "Bearer " + properties.getApiKey())
-                    .buildAsync(resolveUri(), this)
-                    .join();
-            sendSessionUpdate();
+                    .buildAsync(resolveUri(), this);
+            this.webSocketFuture.whenComplete((openedWebSocket, throwable) -> {
+                if (throwable != null) {
+                    fail(throwable);
+                    return;
+                }
+                this.webSocket = openedWebSocket;
+                sendSessionUpdate();
+            });
             executorService.submit(this::drainSegments);
         }
 
@@ -90,9 +98,7 @@ public class AliyunRealtimeTtsClient {
 
         @Override
         public void close() {
-            if (webSocket != null) {
-                webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "done");
-            }
+            webSocketFuture.thenAccept(socket -> socket.sendClose(WebSocket.NORMAL_CLOSURE, "done"));
         }
 
         @Override
@@ -120,6 +126,15 @@ public class AliyunRealtimeTtsClient {
         @Override
         public void onError(WebSocket webSocket, Throwable error) {
             fail(error);
+        }
+
+        @Override
+        public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+            if (!sessionReady.isDone()) {
+                sessionReady.completeExceptionally(new CancellationException("TTS session closed before ready"));
+            }
+            sessionFinished.complete(null);
+            return CompletableFuture.completedFuture(null);
         }
 
         private void drainSegments() {

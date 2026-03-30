@@ -1,8 +1,8 @@
 package com.wlinsk.rd_machine.streaming;
 
 import com.wlinsk.rd_machine.llm.BailianLlmClient;
-import com.wlinsk.rd_machine.llm.LlmMessage;
 import com.wlinsk.rd_machine.llm.LlmDeltaListener;
+import com.wlinsk.rd_machine.llm.LlmMessage;
 import com.wlinsk.rd_machine.prompt.PromptBuilder;
 import com.wlinsk.rd_machine.prompt.PromptContext;
 import com.wlinsk.rd_machine.prompt.RoundGoal;
@@ -15,11 +15,13 @@ import com.wlinsk.rd_machine.tts.AliyunRealtimeTtsService;
 import com.wlinsk.rd_machine.tts.TtsAudioListener;
 import com.wlinsk.rd_machine.tts.TtsStreamSession;
 import java.time.Duration;
-import java.util.concurrent.CancellationException;
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -79,6 +81,7 @@ public class AssistantStreamingOrchestrator {
         StreamingSessionContext context = new StreamingSessionContext(sessionId, turnNo, roundNo);
         long turnStartedAtMs = System.currentTimeMillis();
         long turnStartedAtNs = System.nanoTime();
+        Thread turnThread = Thread.currentThread();
         publishTiming(context, "turn.start", turnStartedAtMs, turnStartedAtNs);
         RoundGoal roundGoal = roundPlanner.goalForRound(roundNo);
         PromptContext promptContext = new PromptContext(session, roundGoal);
@@ -88,6 +91,7 @@ public class AssistantStreamingOrchestrator {
         TtsStreamSession ttsStreamSession = null;
         AtomicBoolean sawFirstTextDelta = new AtomicBoolean();
         AtomicBoolean sawFirstAudioChunk = new AtomicBoolean();
+        AtomicReference<Throwable> fatalFailure = new AtomicReference<>();
 
         try {
             if (handle.isCancelled() || session.isClosed()) {
@@ -126,9 +130,12 @@ public class AssistantStreamingOrchestrator {
 
                     @Override
                     public void onError(Throwable throwable) {
-                        if (!handle.isCancelled()) {
-                            eventPublisher.publishError(context, "TTS_STREAM_FAILED", throwable.getMessage());
+                        if (handle.isCancelled() || session.isClosed()) {
+                            return;
                         }
+                        Throwable normalizedFailure = normalizeFailure(throwable);
+                        markFatalFailure(fatalFailure, normalizedFailure, turnThread);
+                        eventPublisher.publishError(context, "TTS_STREAM_FAILED", failureMessage(normalizedFailure));
                     }
                 });
                 handle.attachTtsStreamSession(ttsStreamSession);
@@ -140,6 +147,7 @@ public class AssistantStreamingOrchestrator {
             llmClient.streamChatCompletion(messages, new LlmDeltaListener() {
                 @Override
                 public void onDelta(String delta) {
+                    throwIfFatalFailure(fatalFailure);
                     if (handle.isCancelled() || session.isClosed()) {
                         throw new CancellationException("Session closed");
                     }
@@ -151,6 +159,7 @@ public class AssistantStreamingOrchestrator {
                     List<TextSegment> segments = textSegmenter.append(delta);
                     if (finalTtsStreamSession != null) {
                         for (TextSegment segment : segments) {
+                            throwIfFatalFailure(fatalFailure);
                             if (handle.isCancelled()) {
                                 throw new CancellationException("Session closed");
                             }
@@ -161,12 +170,14 @@ public class AssistantStreamingOrchestrator {
 
                 @Override
                 public void onComplete() {
+                    throwIfFatalFailure(fatalFailure);
                     if (handle.isCancelled() || session.isClosed()) {
                         return;
                     }
                     publishTiming(context, "llm.stream.completed", System.currentTimeMillis(), turnStartedAtNs);
                     TextSegment remaining = textSegmenter.flushRemaining();
                     if (finalTtsStreamSession != null && remaining != null) {
+                        throwIfFatalFailure(fatalFailure);
                         finalTtsStreamSession.enqueue(remaining);
                     }
                 }
@@ -175,22 +186,26 @@ public class AssistantStreamingOrchestrator {
                 public void onError(Throwable throwable) {
                     throw new IllegalStateException(throwable);
                 }
-            }, handle::isCancelled);
+            }, () -> handle.isCancelled() || fatalFailure.get() != null);
 
+            throwIfFatalFailure(fatalFailure);
             if (handle.isCancelled() || session.isClosed()) {
                 return;
             }
             eventPublisher.publishTextDone(context, fullText.toString());
 
             if (ttsStreamSession != null) {
+                throwIfFatalFailure(fatalFailure);
                 if (handle.isCancelled()) {
                     return;
                 }
                 ttsStreamSession.finish();
+                throwIfFatalFailure(fatalFailure);
                 if (handle.isCancelled()) {
                     return;
                 }
                 ttsStreamSession.awaitFinished(Duration.ofSeconds(60));
+                throwIfFatalFailure(fatalFailure);
             } else {
                 if (handle.isCancelled()) {
                     return;
@@ -198,6 +213,7 @@ public class AssistantStreamingOrchestrator {
                 eventPublisher.publishAudioDone(context);
             }
 
+            throwIfFatalFailure(fatalFailure);
             if (handle.isCancelled() || session.isClosed()) {
                 return;
             }
@@ -206,10 +222,18 @@ public class AssistantStreamingOrchestrator {
             eventPublisher.publishTurnDone(context, session.isAwaitingStudentAnswer());
         } catch (CancellationException exception) {
             Thread.interrupted();
-        } catch (Exception exception) {
-            if (!handle.isCancelled() && !session.isClosed()) {
+            Throwable failure = fatalFailure.get();
+            if (failure != null && !session.isClosed()) {
                 session.markFailed();
-                eventPublisher.publishError(context, "ASSISTANT_STREAM_FAILED", exception.getMessage());
+                eventPublisher.publishError(context, "ASSISTANT_STREAM_FAILED", failureMessage(failure));
+            }
+        } catch (Exception exception) {
+            Thread.interrupted();
+            Throwable failure = fatalFailure.get();
+            Throwable effectiveFailure = failure != null ? failure : normalizeFailure(exception);
+            if (!session.isClosed() && (failure != null || !handle.isCancelled())) {
+                session.markFailed();
+                eventPublisher.publishError(context, "ASSISTANT_STREAM_FAILED", failureMessage(effectiveFailure));
             }
         } finally {
             closeQuietly(ttsStreamSession);
@@ -225,6 +249,47 @@ public class AssistantStreamingOrchestrator {
             closeable.close();
         } catch (Exception ignored) {
         }
+    }
+
+    private void markFatalFailure(AtomicReference<Throwable> fatalFailure, Throwable throwable, Thread turnThread) {
+        if (throwable == null) {
+            return;
+        }
+        if (fatalFailure.compareAndSet(null, throwable)) {
+            turnThread.interrupt();
+        }
+    }
+
+    private void throwIfFatalFailure(AtomicReference<Throwable> fatalFailure) {
+        Throwable throwable = fatalFailure.get();
+        if (throwable == null) {
+            return;
+        }
+        if (throwable instanceof RuntimeException runtimeException) {
+            throw runtimeException;
+        }
+        throw new IllegalStateException(throwable);
+    }
+
+    private Throwable normalizeFailure(Throwable throwable) {
+        if (throwable instanceof CompletionException completionException && completionException.getCause() != null) {
+            return normalizeFailure(completionException.getCause());
+        }
+        if (throwable instanceof IllegalStateException illegalStateException && illegalStateException.getCause() != null) {
+            return normalizeFailure(illegalStateException.getCause());
+        }
+        return throwable;
+    }
+
+    private String failureMessage(Throwable throwable) {
+        if (throwable == null) {
+            return "Unknown failure";
+        }
+        String message = throwable.getMessage();
+        if (message == null || message.isBlank()) {
+            return throwable.getClass().getSimpleName();
+        }
+        return message;
     }
 
     private void publishTiming(StreamingSessionContext context, String phase, long serverTimestampMs, long turnStartedAtNs) {
