@@ -53,44 +53,24 @@
 
 前端如果要处理这个包裹层，直接看 `ui/src/api.ts` 中的 `request()` 和 `unwrapApiResult()`。
 
-### 1. 获取文章列表
-
-- 方法：`GET`
-- 路径：`/api/articles`
-- 入参：无
-
-业务出参：`ArticleSummary[]`
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `articleId` | `string` | 文章 ID，创建会话时需要传入 |
-| `title` | `string` | 文章标题 |
-| `author` | `string` | 作者 |
-| `language` | `string` | 语言标识，当前样例为 `zh-HK` |
-
-业务出参示例：
-
-```json
-[
-  {
-    "articleId": "YW-6A-003",
-    "title": "少年闰土",
-    "author": "鲁迅",
-    "language": "zh-HK"
-  }
-]
-```
-
-### 2. 创建会话
+### 1. 创建会话
 
 - 方法：`POST`
 - 路径：`/api/sessions`
+
+说明：
+
+- 当前文章内容由前端维护，调试前端直接使用 `ui/src/articles.ts` 里写死的 3 篇文章
+- 后端已不再提供文章列表接口，创建会话时需要直接传入文章元数据和全文
 
 请求体：
 
 ```json
 {
-  "articleId": "YW-6A-003"
+  "title": "草原",
+  "author": "老舍",
+  "language": "zh-HK",
+  "content": "天，終於亮起來了。"
 }
 ```
 
@@ -98,7 +78,10 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `articleId` | `string` | 是 | 文章 ID，必须能在文章目录里找到 |
+| `title` | `string` | 是 | 文章标题 |
+| `author` | `string` | 是 | 作者 |
+| `language` | `string` | 是 | 文章语言标识 |
+| `content` | `string` | 是 | 文章全文内容 |
 
 业务出参：`CreateSessionResponse`
 
@@ -125,12 +108,13 @@
 联调注意：
 
 - 该接口返回后，后端已经开始生成教师回复，因此前端要立刻建立 WS 连接，不要等用户再点别的按钮
+- 当前调试前端直接从 `ui/src/articles.ts` 选中本地文章，并把 `title`、`author`、`language`、`content` 直接传给后端
 - 当前调试前端没有直接使用返回的 `wsUrl`，而是自己用 `sessionId + apiBaseUrl` 拼出了 WS 地址
 - 如果后端以后修改了 WS 路径、域名或返回完整 URL，前端工程师需要同步检查：
   - `ui/src/App.tsx` 里的 `handleSelectArticle()`、`connectSocket()`
   - `ui/src/ws.ts` 里的 `openSessionSocket()`
 
-### 3. 提交学生回答
+### 2. 提交学生回答
 
 - 方法：`POST`
 - 路径：`/api/sessions/{sessionId}/turns`
@@ -145,13 +129,8 @@
 
 ```json
 {
-  "turnNo": 2,
   "clientSeq": 1743047322485,
-  "text": "学生端 ASR 最终文本",
-  "asrMeta": {
-    "final": true,
-    "source": "debug-ui"
-  }
+  "text": "学生端 ASR 最终文本"
 }
 ```
 
@@ -159,10 +138,8 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `turnNo` | `number` | 否 | 预留字段，当前后端代码没有读取它 |
 | `clientSeq` | `number` | 否 | 客户端幂等序号。同一会话内重复提交相同值会返回 `accepted=false` |
 | `text` | `string` | 是 | 学生作答文本，建议传 ASR 最终结果 |
-| `asrMeta` | `object` | 否 | ASR 附加元数据，后端会接收并存储，但当前快照接口不会回传它 |
 
 业务出参：`SubmitTurnResponse`
 
@@ -195,7 +172,7 @@
   - `ui/src/App.tsx` 的 `handleSubmitStudentTurn()`
   - `ui/src/components/StudentInputPanel.tsx`
 
-### 4. 主动关闭会话
+### 3. 主动关闭会话
 
 - 方法：`POST`
 - 路径：`/api/sessions/{sessionId}/close`
@@ -209,7 +186,7 @@
 
 - `ui/src/App.tsx` 的 `handleCloseSession()`
 
-### 5. 获取会话快照
+### 4. 获取会话快照
 
 - 方法：`GET`
 - 路径：`/api/sessions/{sessionId}`
@@ -222,10 +199,9 @@
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `sessionId` | `string` | 会话 ID |
-| `articleId` | `string` | 文章 ID |
-| `title` | `string` | 文章标题 |
-| `author` | `string` | 作者 |
-| `language` | `string` | 语言 |
+| `title` | `string` | 创建会话时传入的文章标题 |
+| `author` | `string` | 创建会话时传入的作者 |
+| `language` | `string` | 创建会话时传入的语言 |
 | `status` | `string` | 会话状态 |
 | `currentRoundNo` | `number` | 当前轮次 |
 | `currentTurnNo` | `number` | 当前教师回合号 |
@@ -253,9 +229,8 @@
 ```json
 {
   "sessionId": "0c5b6de6-7f77-4d76-9303-31c0324d5a65",
-  "articleId": "YW-6A-003",
-  "title": "少年闰土",
-  "author": "鲁迅",
+  "title": "草原",
+  "author": "老舍",
   "language": "zh-HK",
   "status": "WAITING_STUDENT",
   "currentRoundNo": 1,
@@ -596,14 +571,13 @@ pong
 | WS 地址拼装 | `ui/src/ws.ts` 的 `openSessionSocket()` | 当前前端自己拼 WS URL，没有直接使用后端返回的 `wsUrl` |
 | WS 事件解析 | `ui/src/ws.ts` 的 `parseAssistantEventMessage()` | 这里只接受标准 `AssistantEvent` |
 | 所有 WS 事件消费 | `ui/src/App.tsx` 的 `handleAssistantEvent()` | 每种 `assistant.*` 事件的客户端行为都在这里 |
-| 学生回答提交 | `ui/src/App.tsx` 的 `handleSubmitStudentTurn()` | 这里定义了 `clientSeq`、`text`、`asrMeta` 的实际提交方式 |
+| 学生回答提交 | `ui/src/App.tsx` 的 `handleSubmitStudentTurn()` | 这里定义了 `clientSeq`、`text` 的实际提交方式 |
 | 音频解码与播放 | `ui/src/audio/pcmPlayer.ts` | 这里定义了 `assistant.audio.chunk` 的客户端消费格式 |
 | 关闭会话清理 | `ui/src/App.tsx` 的 `handleCloseSession()` | 这里处理 socket 关闭、播放器 reset 和状态清理 |
 
 ## 当前协议里的几个实现性提醒
 
 - `CreateSessionResponse.wsUrl` 当前是相对路径，不是完整 URL
-- `SubmitTurnRequest.turnNo` 当前后端未使用，不要把它当成后端校验依据
 - `SubmitTurnRequest.clientSeq` 是幂等去重键，客户端应保证每次真实提交都不重复
 - `assistant.turn.done` 不是完整快照，仍需配合 HTTP 快照接口使用
 - `assistant.audio.chunk` 当前按 PCM 数据播放，客户端如果不用现成调试前端，需要自行实现解码/播放

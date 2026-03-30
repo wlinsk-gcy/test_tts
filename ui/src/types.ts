@@ -1,10 +1,3 @@
-﻿export type ArticleSummary = {
-  articleId: string;
-  title: string;
-  author: string;
-  language: string;
-};
-
 export type DebugArticle = {
   id: string;
   title: string;
@@ -33,10 +26,8 @@ export type CreateSessionResponse = {
 };
 
 export type SubmitTurnRequest = {
-  turnNo?: number;
   clientSeq?: number;
   text: string;
-  asrMeta?: Record<string, unknown>;
 };
 
 export type SubmitTurnResponse = {

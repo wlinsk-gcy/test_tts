@@ -1,6 +1,5 @@
-﻿import type {
+import type {
   ApiResult,
-  ArticleSummary,
   CreateSessionPayload,
   CreateSessionResponse,
   SessionSnapshotResponse,
@@ -38,10 +37,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const apiBaseUrl = API_BASE;
-
-export function fetchArticles(): Promise<ArticleSummary[]> {
-  return request<ArticleSummary[]>("/api/articles", { method: "GET" });
-}
 
 export function createSession(payload: CreateSessionPayload): Promise<CreateSessionResponse> {
   return request<CreateSessionResponse>("/api/sessions", {

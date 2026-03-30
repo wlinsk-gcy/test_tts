@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DEBUG_ARTICLES } from "./articles";
 import { apiBaseUrl, closeSession, createSession, fetchSessionSnapshot, submitTurn } from "./api";
 import { PcmPlayer } from "./audio/pcmPlayer";
@@ -55,7 +55,12 @@ export default function App() {
       socketRef.current?.close();
       setSocketState("creating-session");
       pushTimeline(setTimeline, { at: Date.now(), label: "session.create.start", detail: article.title });
-      const created = await createSession(article);
+      const created = await createSession({
+        title: article.title,
+        author: article.author,
+        language: article.language,
+        content: article.content
+      });
       setSessionId(created.sessionId);
       setStatus(created.status);
       setRoundNo(created.currentRoundNo);
@@ -194,8 +199,7 @@ export default function App() {
       pushTimeline(setTimeline, { at: Date.now(), label: "student.submit", detail: studentText.trim() });
       const result = await submitTurn(sessionId, {
         clientSeq: Date.now(),
-        text: studentText.trim(),
-        asrMeta: { final: true, source: "debug-ui" }
+        text: studentText.trim()
       });
       setStudentText("");
       setStatus(result.status);

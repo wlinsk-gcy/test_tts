@@ -1,12 +1,10 @@
 package com.wlinsk.rd_machine.session;
 
-import com.wlinsk.rd_machine.article.ArticleCatalogService;
 import com.wlinsk.rd_machine.article.ArticleDetail;
 import com.wlinsk.rd_machine.streaming.ActiveAssistantTurnRegistry;
 import com.wlinsk.rd_machine.streaming.AssistantStreamingOrchestrator;
 import com.wlinsk.rd_machine.transport.http.dto.SessionSnapshotResponse;
 import com.wlinsk.rd_machine.transport.http.dto.SubmitTurnRequest;
-import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
@@ -16,25 +14,22 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class SessionService {
 
-    private final ArticleCatalogService articleCatalogService;
     private final InMemorySessionStore sessionStore;
     private final ActiveAssistantTurnRegistry activeTurnRegistry;
     private final ObjectProvider<AssistantStreamingOrchestrator> orchestratorProvider;
 
     public SessionService(
-            ArticleCatalogService articleCatalogService,
             InMemorySessionStore sessionStore,
             ActiveAssistantTurnRegistry activeTurnRegistry,
             ObjectProvider<AssistantStreamingOrchestrator> orchestratorProvider
     ) {
-        this.articleCatalogService = articleCatalogService;
         this.sessionStore = sessionStore;
         this.activeTurnRegistry = activeTurnRegistry;
         this.orchestratorProvider = orchestratorProvider;
     }
 
     public ReadingSession createSession(String title, String author, String language, String content) {
-        ArticleDetail article = new ArticleDetail(null, title, author, language, content);
+        ArticleDetail article = new ArticleDetail(title, author, language, content);
         ReadingSession session = new ReadingSession(UUID.randomUUID().toString(), article);
         session.markGenerating();
         sessionStore.save(session);
@@ -50,7 +45,7 @@ public class SessionService {
         long clientSeq = request.clientSeq() == null ? session.getCurrentTurnNo() : request.clientSeq();
         boolean accepted;
         try {
-            accepted = session.acceptStudentAnswer(clientSeq, request.text(), safeAsrMeta(request));
+            accepted = session.acceptStudentAnswer(clientSeq, request.text());
         } catch (IllegalStateException exception) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, exception.getMessage(), exception);
         }
@@ -102,10 +97,6 @@ public class SessionService {
                         ))
                         .toList()
         );
-    }
-
-    private Map<String, Object> safeAsrMeta(SubmitTurnRequest request) {
-        return request.asrMeta() == null ? Map.of() : Map.copyOf(request.asrMeta());
     }
 
     private void triggerAssistantTurn(String sessionId) {

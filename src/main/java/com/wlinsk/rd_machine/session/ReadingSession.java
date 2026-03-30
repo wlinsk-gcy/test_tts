@@ -4,7 +4,6 @@ import com.wlinsk.rd_machine.article.ArticleDetail;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 public class ReadingSession {
 
@@ -84,7 +83,7 @@ public class ReadingSession {
         touch();
     }
 
-    public synchronized boolean acceptStudentAnswer(long clientSeq, String rawText, Map<String, Object> asrMeta) {
+    public synchronized boolean acceptStudentAnswer(long clientSeq, String rawText) {
         if (status == SessionStatus.CLOSED) {
             throw new IllegalStateException("Session is closed");
         }
@@ -101,7 +100,6 @@ public class ReadingSession {
                 lastAssistantMessageText,
                 rawText,
                 normalized,
-                asrMeta,
                 TurnDecision.NEXT_ROUND,
                 updatedAt,
                 Instant.now()
