@@ -1,22 +1,14 @@
 package com.wlinsk.rd_machine.transport.http;
 
+import com.wlinsk.rd_machine.model.Result;
 import com.wlinsk.rd_machine.session.ReadingSession;
 import com.wlinsk.rd_machine.session.SessionService;
-import com.wlinsk.rd_machine.transport.http.dto.CreateSessionRequest;
-import com.wlinsk.rd_machine.transport.http.dto.CreateSessionResponse;
-import com.wlinsk.rd_machine.transport.http.dto.SessionSnapshotResponse;
-import com.wlinsk.rd_machine.transport.http.dto.SubmitTurnRequest;
-import com.wlinsk.rd_machine.transport.http.dto.SubmitTurnResponse;
-import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import com.wlinsk.rd_machine.transport.http.dto.*;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.*;
 
+@Validated
 @RestController
-@CrossOrigin(origins = "http://localhost:5173")
 @RequestMapping("/api/sessions")
 public class SessionController {
 
@@ -27,37 +19,42 @@ public class SessionController {
     }
 
     @PostMapping
-    public CreateSessionResponse createSession(@RequestBody CreateSessionRequest request) {
+    public Result<CreateSessionResponse> createSession(@RequestBody CreateSessionRequest request) {
         ReadingSession session = sessionService.createSession(request.articleId());
-        return new CreateSessionResponse(
+        CreateSessionResponse response = new CreateSessionResponse(
                 session.getSessionId(),
                 session.getStatus().name(),
                 session.getCurrentRoundNo(),
                 session.getCurrentTurnNo(),
                 "/ws/sessions/" + session.getSessionId()
         );
+        return Result.ok(response);
     }
 
     @PostMapping("/{sessionId}/turns")
-    public SubmitTurnResponse submitTurn(@PathVariable String sessionId, @RequestBody SubmitTurnRequest request) {
+    public Result<SubmitTurnResponse> submitTurn(@PathVariable String sessionId, @RequestBody SubmitTurnRequest request) {
         boolean accepted = sessionService.submitStudentTurn(sessionId, request);
         ReadingSession session = sessionService.getRequiredSession(sessionId);
-        return new SubmitTurnResponse(
+        SubmitTurnResponse response = new SubmitTurnResponse(
                 accepted,
                 session.getSessionId(),
                 session.getStatus().name(),
                 session.getCurrentRoundNo(),
                 session.getCurrentTurnNo()
         );
+
+        return Result.ok(response);
     }
 
     @PostMapping("/{sessionId}/close")
-    public SessionSnapshotResponse closeSession(@PathVariable String sessionId) {
-        return sessionService.closeSession(sessionId);
+    public Result<SessionSnapshotResponse> closeSession(@PathVariable String sessionId) {
+        SessionSnapshotResponse response = sessionService.closeSession(sessionId);
+        return Result.ok(response);
     }
 
     @GetMapping("/{sessionId}")
-    public SessionSnapshotResponse getSnapshot(@PathVariable String sessionId) {
-        return sessionService.getSnapshot(sessionId);
+    public Result<SessionSnapshotResponse> getSnapshot(@PathVariable String sessionId) {
+        SessionSnapshotResponse response = sessionService.getSnapshot(sessionId);
+        return Result.ok(response);
     }
 }

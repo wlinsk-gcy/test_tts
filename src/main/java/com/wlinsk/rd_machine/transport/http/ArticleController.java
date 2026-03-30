@@ -2,14 +2,16 @@ package com.wlinsk.rd_machine.transport.http;
 
 import com.wlinsk.rd_machine.article.ArticleCatalogService;
 import com.wlinsk.rd_machine.article.ArticleSummary;
-import java.util.List;
-import org.springframework.web.bind.annotation.CrossOrigin;
+import com.wlinsk.rd_machine.model.Result;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
+@Validated
 @RestController
-@CrossOrigin(origins = "http://localhost:5173")
 @RequestMapping("/api/articles")
 public class ArticleController {
 
@@ -20,7 +22,8 @@ public class ArticleController {
     }
 
     @GetMapping
-    public List<ArticleSummary> listArticles() {
-        return articleCatalogService.listArticles();
+    public Result<List<ArticleSummary>> listArticles() {
+        List<ArticleSummary> articleSummaries = articleCatalogService.listArticles();
+        return Result.ok(articleSummaries);
     }
 }

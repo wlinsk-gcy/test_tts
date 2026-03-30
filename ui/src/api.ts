@@ -1,4 +1,5 @@
 import type {
+  ApiResult,
   ArticleSummary,
   CreateSessionResponse,
   SessionSnapshotResponse,
@@ -6,7 +7,14 @@ import type {
   SubmitTurnResponse
 } from "./types";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "http://localhost:8080";
+const API_BASE = ((import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_API_BASE_URL)?.replace(/\/$/, "") ?? "http://localhost:8080";
+
+export function unwrapApiResult<T>(payload: ApiResult<T>): T {
+  if (payload.rspCd !== "00000") {
+    throw new Error(payload.rspInf || `Request failed with code ${payload.rspCd}`);
+  }
+  return payload.data;
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers ?? undefined);
@@ -24,7 +32,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`${response.status} ${response.statusText}: ${text}`);
   }
 
-  return response.json() as Promise<T>;
+  const payload = await response.json() as ApiResult<T>;
+  return unwrapApiResult(payload);
 }
 
 export const apiBaseUrl = API_BASE;

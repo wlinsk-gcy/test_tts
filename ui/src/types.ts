@@ -5,6 +5,15 @@ export type ArticleSummary = {
   language: string;
 };
 
+export type ApiResult<T> = {
+  rspCd: string;
+  rspInf: string;
+  data: T;
+  responseTm?: string;
+  rspType?: number;
+  v?: string;
+};
+
 export type CreateSessionResponse = {
   sessionId: string;
   status: string;

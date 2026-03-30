@@ -7,6 +7,26 @@ export type SessionSocketCallbacks = {
   onEvent?: (event: AssistantEvent) => void;
 };
 
+function isAssistantEvent(value: unknown): value is AssistantEvent {
+  return typeof value === "object"
+    && value !== null
+    && typeof (value as { type?: unknown }).type === "string"
+    && typeof (value as { sessionId?: unknown }).sessionId === "string"
+    && typeof (value as { turnNo?: unknown }).turnNo === "number"
+    && typeof (value as { roundNo?: unknown }).roundNo === "number"
+    && typeof (value as { data?: unknown }).data === "object"
+    && (value as { data?: unknown }).data !== null;
+}
+
+export function parseAssistantEventMessage(messageData: unknown): AssistantEvent | null {
+  try {
+    const parsed = JSON.parse(String(messageData)) as unknown;
+    return isAssistantEvent(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function openSessionSocket(sessionId: string, backendBaseUrl: string, callbacks: SessionSocketCallbacks): WebSocket {
   const base = backendBaseUrl || "http://localhost:8080";
   const url = new URL(`/ws/sessions/${sessionId}`, base);
@@ -16,11 +36,9 @@ export function openSessionSocket(sessionId: string, backendBaseUrl: string, cal
   socket.addEventListener("close", (event) => callbacks.onClose?.(event));
   socket.addEventListener("error", (event) => callbacks.onError?.(event));
   socket.addEventListener("message", (message) => {
-    try {
-      const parsed = JSON.parse(String(message.data)) as AssistantEvent;
+    const parsed = parseAssistantEventMessage(message.data);
+    if (parsed) {
       callbacks.onEvent?.(parsed);
-    } catch {
-      // Ignore malformed debug messages.
     }
   });
   return socket;
