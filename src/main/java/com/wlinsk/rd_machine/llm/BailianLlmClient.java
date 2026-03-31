@@ -3,18 +3,14 @@ package com.wlinsk.rd_machine.llm;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.core.http.StreamResponse;
-import com.openai.models.chat.completions.ChatCompletionAssistantMessageParam;
-import com.openai.models.chat.completions.ChatCompletionChunk;
-import com.openai.models.chat.completions.ChatCompletionCreateParams;
-import com.openai.models.chat.completions.ChatCompletionMessageParam;
-import com.openai.models.chat.completions.ChatCompletionSystemMessageParam;
-import com.openai.models.chat.completions.ChatCompletionUserMessageParam;
+import com.openai.models.chat.completions.*;
 import com.wlinsk.rd_machine.config.AiLlmProperties;
+import org.springframework.stereotype.Component;
+
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.function.BooleanSupplier;
-import java.util.List;
-import org.springframework.stereotype.Component;
 
 @Component
 public class BailianLlmClient {

@@ -17,6 +17,6 @@ public class WsConfig implements WebSocketConfigurer {
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(sessionWebSocketHandler, "/ws/sessions/*").setAllowedOrigins("http://localhost:5173");
+        registry.addHandler(sessionWebSocketHandler, "/ws/sessions/*").setAllowedOrigins("*");
     }
 }
