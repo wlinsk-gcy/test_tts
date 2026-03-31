@@ -7,8 +7,8 @@ import com.wlinsk.rd_machine.streaming.StreamingSessionContext;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
 @Component
@@ -17,15 +17,27 @@ public class AssistantEventPublisher {
     private final ObjectMapper objectMapper;
     private final SessionConnectionRegistry connectionRegistry;
     private final WebSocketAccessLogHelper accessLogHelper;
+    private final WebSocketTextMessageSender messageSender;
 
     public AssistantEventPublisher(
             ObjectMapper objectMapper,
             SessionConnectionRegistry connectionRegistry,
             WebSocketAccessLogHelper accessLogHelper
     ) {
+        this(objectMapper, connectionRegistry, accessLogHelper, new WebSocketTextMessageSender());
+    }
+
+    @Autowired
+    public AssistantEventPublisher(
+            ObjectMapper objectMapper,
+            SessionConnectionRegistry connectionRegistry,
+            WebSocketAccessLogHelper accessLogHelper,
+            WebSocketTextMessageSender messageSender
+    ) {
         this.objectMapper = objectMapper;
         this.connectionRegistry = connectionRegistry;
         this.accessLogHelper = accessLogHelper;
+        this.messageSender = messageSender;
     }
 
     public void publishTextDelta(StreamingSessionContext context, String delta) {
@@ -97,12 +109,10 @@ public class AssistantEventPublisher {
             if (!connection.isOpen()) {
                 continue;
             }
-            synchronized (connection) {
-                try {
-                    connection.sendMessage(new TextMessage(payload));
-                } catch (Exception ignored) {
-                    // Best-effort push for transient frontend connections.
-                }
+            try {
+                messageSender.send(connection, payload);
+            } catch (Exception ignored) {
+                // Best-effort push for transient frontend connections.
             }
         }
     }

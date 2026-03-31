@@ -1,6 +1,7 @@
 package com.wlinsk.rd_machine.transport.ws;
 
 import com.wlinsk.rd_machine.logging.WebSocketAccessLogHelper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -12,13 +13,24 @@ public class SessionWebSocketHandler extends TextWebSocketHandler {
 
     private final SessionConnectionRegistry connectionRegistry;
     private final WebSocketAccessLogHelper accessLogHelper;
+    private final WebSocketTextMessageSender messageSender;
 
     public SessionWebSocketHandler(
             SessionConnectionRegistry connectionRegistry,
             WebSocketAccessLogHelper accessLogHelper
     ) {
+        this(connectionRegistry, accessLogHelper, new WebSocketTextMessageSender());
+    }
+
+    @Autowired
+    public SessionWebSocketHandler(
+            SessionConnectionRegistry connectionRegistry,
+            WebSocketAccessLogHelper accessLogHelper,
+            WebSocketTextMessageSender messageSender
+    ) {
         this.connectionRegistry = connectionRegistry;
         this.accessLogHelper = accessLogHelper;
+        this.messageSender = messageSender;
     }
 
     @Override
@@ -38,12 +50,12 @@ public class SessionWebSocketHandler extends TextWebSocketHandler {
         accessLogHelper.logInboundText(session, message.getPayload());
         if ("ping".equalsIgnoreCase(message.getPayload())) {
             accessLogHelper.logDirectOutboundText(session, "pong", "ping");
-            session.sendMessage(new TextMessage("pong"));
+            messageSender.send(session, "pong");
             return;
         }
         String noopPayload = "{\"type\":\"noop\",\"data\":{}}";
         accessLogHelper.logDirectOutboundText(session, noopPayload, "noop");
-        session.sendMessage(new TextMessage(noopPayload));
+        messageSender.send(session, noopPayload);
     }
 
     @Override
