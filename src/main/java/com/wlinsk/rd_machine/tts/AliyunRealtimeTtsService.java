@@ -23,7 +23,7 @@ public class AliyunRealtimeTtsService {
 
     public TtsStreamSession openSession(String articleLanguage, TtsAudioListener audioListener) {
         TtsSynthesisRequest request = new TtsSynthesisRequest(
-                properties.getVoice(),
+                articleLanguage != null && articleLanguage.startsWith("en") ? properties.getEnVoice() : properties.getZhVoice(),
                 properties.normalizedMode(),
                 properties.getResponseFormat(),
                 properties.getSampleRate(),

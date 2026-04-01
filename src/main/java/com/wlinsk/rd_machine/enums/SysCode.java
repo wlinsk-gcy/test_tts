@@ -1,7 +1,6 @@
 package com.wlinsk.rd_machine.enums;
 
 
-
 public enum SysCode implements ReturnCode {
     success("00000", "success"),
 
@@ -14,6 +13,9 @@ public enum SysCode implements ReturnCode {
     TRANSACTION_EXCEPTION("9993", "TransactionException"),
     HTTP_CLINT_ERROR("9992", "http clint error"),
     SYS_TOKEN_EXPIRE("9991", "Invalid token"),
+    TTS_SEGMENT_QUEUE_FULL("9990", "TTS segment queue is full"),
+    TTS_STREAM_FAILED("9989", "TTS stream failed"),
+    ASSISTANT_STREAM_FAILED("9988", "Assistant stream failed"),
 
     PARAMETER_ERROR("9000", "Parameter validation error"),
     ;

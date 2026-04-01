@@ -49,6 +49,12 @@
             <artifactId>lombok</artifactId>
             <version>1.18.38</version>
         </dependency>
+        <!-- Source: https://mvnrepository.com/artifact/com.github.houbb/opencc4j -->
+        <dependency>
+            <groupId>com.github.houbb</groupId>
+            <artifactId>opencc4j</artifactId>
+            <version>1.14.0</version>
+        </dependency>
     </dependencies>
     <build>
         <plugins>

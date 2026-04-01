@@ -13,23 +13,22 @@ import java.util.concurrent.CancellationException;
 import java.util.function.BooleanSupplier;
 
 @Component
-public class BailianLlmClient {
+public class LlmClient {
 
-    private final AiLlmProperties properties;
-    private final BailianLlmService llmService;
+    private final LlmService llmService;
+    private final OpenAIClient openAIClient;
 
-    public BailianLlmClient(AiLlmProperties properties, BailianLlmService llmService) {
-        this.properties = properties;
+    public LlmClient(AiLlmProperties properties, LlmService llmService) {
         this.llmService = llmService;
-    }
-
-    public void streamChatCompletion(List<LlmMessage> messages, LlmDeltaListener listener, BooleanSupplier cancelled) {
-        ChatCompletionCreateParams params = buildParams(messages);
-        OpenAIClient openAIClient = OpenAIOkHttpClient.builder()
+        this.openAIClient = OpenAIOkHttpClient.builder()
                 .apiKey(properties.getApiKey())
                 .baseUrl(properties.getBaseUrl())
                 .timeout(Duration.ofMinutes(2))
                 .build();
+    }
+
+    public void streamChatCompletion(List<LlmMessage> messages, LlmDeltaListener listener, BooleanSupplier cancelled) {
+        ChatCompletionCreateParams params = buildParams(messages);
         try (StreamResponse<ChatCompletionChunk> response = openAIClient.chat().completions().createStreaming(params)) {
             response.stream()
                     .flatMap(chunk -> chunk.choices().stream())

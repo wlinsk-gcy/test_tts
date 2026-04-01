@@ -51,7 +51,7 @@ public class WebSocketAccessLogHelper {
 
     public void logAssistantOutbound(AssistantEvent event, int recipientCount) {
         Map<String, Object> logEntry = new LinkedHashMap<>();
-        logEntry.put("category", "ws");
+//        logEntry.put("category", "ws");
         logEntry.put("event", "message");
         logEntry.put("direction", "outbound");
         logEntry.put("type", event.type());
@@ -65,7 +65,7 @@ public class WebSocketAccessLogHelper {
 
     private Map<String, Object> baseSessionEntry(String eventName, WebSocketSession session) {
         Map<String, Object> logEntry = new LinkedHashMap<>();
-        logEntry.put("category", "ws");
+//        logEntry.put("category", "ws");
         logEntry.put("event", eventName);
         logEntry.put("connectionId", session != null ? session.getId() : null);
         logEntry.put("path", session != null ? asPath(session.getUri()) : null);

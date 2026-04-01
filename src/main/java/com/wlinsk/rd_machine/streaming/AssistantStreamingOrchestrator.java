@@ -1,6 +1,9 @@
 package com.wlinsk.rd_machine.streaming;
 
-import com.wlinsk.rd_machine.llm.BailianLlmClient;
+import com.github.houbb.opencc4j.util.ZhConverterUtil;
+import com.wlinsk.rd_machine.enums.SysCode;
+import com.wlinsk.rd_machine.exception.BasicException;
+import com.wlinsk.rd_machine.llm.LlmClient;
 import com.wlinsk.rd_machine.llm.LlmDeltaListener;
 import com.wlinsk.rd_machine.llm.LlmMessage;
 import com.wlinsk.rd_machine.prompt.PromptBuilder;
@@ -14,6 +17,12 @@ import com.wlinsk.rd_machine.transport.ws.SessionConnectionRegistry;
 import com.wlinsk.rd_machine.tts.AliyunRealtimeTtsService;
 import com.wlinsk.rd_machine.tts.TtsAudioListener;
 import com.wlinsk.rd_machine.tts.TtsStreamSession;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CancellationException;
@@ -22,19 +31,19 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
 
 @Service
 public class AssistantStreamingOrchestrator {
 
     private static final Logger log = LoggerFactory.getLogger(AssistantStreamingOrchestrator.class);
 
+    @Value("${spring.profiles.active:}")
+    private String activeProfiles;
+
     private final InMemorySessionStore sessionStore;
     private final RoundPlanner roundPlanner;
     private final PromptBuilder promptBuilder;
-    private final BailianLlmClient llmClient;
+    private final LlmClient llmClient;
     private final AliyunRealtimeTtsService ttsService;
     private final AssistantEventPublisher eventPublisher;
     private final SessionConnectionRegistry connectionRegistry;
@@ -45,12 +54,12 @@ public class AssistantStreamingOrchestrator {
             InMemorySessionStore sessionStore,
             RoundPlanner roundPlanner,
             PromptBuilder promptBuilder,
-            BailianLlmClient llmClient,
+            LlmClient llmClient,
             AliyunRealtimeTtsService ttsService,
             AssistantEventPublisher eventPublisher,
             SessionConnectionRegistry connectionRegistry,
             ActiveAssistantTurnRegistry activeTurnRegistry,
-            ExecutorService executorService
+            @Qualifier("assistantStreamingExecutor") ExecutorService executorService
     ) {
         this.sessionStore = sessionStore;
         this.roundPlanner = roundPlanner;
@@ -135,7 +144,7 @@ public class AssistantStreamingOrchestrator {
                         }
                         Throwable normalizedFailure = normalizeFailure(throwable);
                         markFatalFailure(fatalFailure, normalizedFailure, turnThread);
-                        eventPublisher.publishError(context, "TTS_STREAM_FAILED", failureMessage(normalizedFailure));
+                        eventPublisher.publishError(context, failureCode(normalizedFailure, SysCode.TTS_STREAM_FAILED), failureMessage(normalizedFailure));
                     }
                 });
                 handle.attachTtsStreamSession(ttsStreamSession);
@@ -154,9 +163,10 @@ public class AssistantStreamingOrchestrator {
                     if (sawFirstTextDelta.compareAndSet(false, true)) {
                         publishTiming(context, "llm.first.delta", System.currentTimeMillis(), turnStartedAtNs);
                     }
+
                     fullText.append(delta);
                     eventPublisher.publishTextDelta(context, delta);
-                    List<TextSegment> segments = textSegmenter.append(delta);
+                    List<TextSegment> segments = toTtsSegments(textSegmenter.append(delta), session.getArticle().language());
                     if (finalTtsStreamSession != null) {
                         for (TextSegment segment : segments) {
                             throwIfFatalFailure(fatalFailure);
@@ -178,7 +188,7 @@ public class AssistantStreamingOrchestrator {
                     TextSegment remaining = textSegmenter.flushRemaining();
                     if (finalTtsStreamSession != null && remaining != null) {
                         throwIfFatalFailure(fatalFailure);
-                        finalTtsStreamSession.enqueue(remaining);
+                        finalTtsStreamSession.enqueue(toTtsSegment(remaining, session.getArticle().language()));
                     }
                 }
 
@@ -225,7 +235,7 @@ public class AssistantStreamingOrchestrator {
             Throwable failure = fatalFailure.get();
             if (failure != null && !session.isClosed()) {
                 session.markFailed();
-                eventPublisher.publishError(context, "ASSISTANT_STREAM_FAILED", failureMessage(failure));
+                eventPublisher.publishError(context, failureCode(failure, SysCode.ASSISTANT_STREAM_FAILED), failureMessage(failure));
             }
         } catch (Exception exception) {
             Thread.interrupted();
@@ -233,7 +243,7 @@ public class AssistantStreamingOrchestrator {
             Throwable effectiveFailure = failure != null ? failure : normalizeFailure(exception);
             if (!session.isClosed() && (failure != null || !handle.isCancelled())) {
                 session.markFailed();
-                eventPublisher.publishError(context, "ASSISTANT_STREAM_FAILED", failureMessage(effectiveFailure));
+                eventPublisher.publishError(context, failureCode(effectiveFailure, SysCode.ASSISTANT_STREAM_FAILED), failureMessage(effectiveFailure));
             }
         } finally {
             closeQuietly(ttsStreamSession);
@@ -271,6 +281,32 @@ public class AssistantStreamingOrchestrator {
         throw new IllegalStateException(throwable);
     }
 
+    static String failureCode(Throwable throwable, SysCode defaultCode) {
+        if (throwable instanceof BasicException basicException && basicException.getStatus() != null && !basicException.getStatus().isBlank()) {
+            return basicException.getStatus();
+        }
+        return defaultCode.getCode();
+    }
+
+    static List<TextSegment> toTtsSegments(List<TextSegment> segments, String language) {
+        return segments.stream()
+                .map(segment -> toTtsSegment(segment, language))
+                .toList();
+    }
+
+    static TextSegment toTtsSegment(TextSegment segment, String language) {
+        if (segment == null) {
+            return null;
+        }
+        if (language == null || !language.startsWith("zh")) {
+            return segment;
+        }
+        long start = System.nanoTime();
+        String afterConvert = ZhConverterUtil.toSimple(segment.text());
+        log.info("raw text: \"{}\", after convert text: \"{}\", time: {}ns",segment.text(),afterConvert,(System.nanoTime() - start));
+        return new TextSegment(segment.segmentSeq(), afterConvert);
+    }
+
     private Throwable normalizeFailure(Throwable throwable) {
         if (throwable instanceof CompletionException completionException && completionException.getCause() != null) {
             return normalizeFailure(completionException.getCause());
@@ -298,6 +334,11 @@ public class AssistantStreamingOrchestrator {
                 : Math.max(0L, (System.nanoTime() - turnStartedAtNs) / 1_000_000L);
         log.info("assistant-phase sessionId={} turnNo={} roundNo={} phase={} elapsedMs={}",
                 context.sessionId(), context.turnNo(), context.roundNo(), phase, elapsedMs);
-        eventPublisher.publishTiming(context, phase, serverTimestampMs, elapsedMs);
+        if("dev".equals(activeProfiles)){
+            eventPublisher.publishTiming(context, phase, serverTimestampMs, elapsedMs);
+        }
     }
 }
+
+
+

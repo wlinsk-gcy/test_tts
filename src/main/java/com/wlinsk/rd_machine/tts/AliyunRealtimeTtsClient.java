@@ -3,7 +3,12 @@ package com.wlinsk.rd_machine.tts;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wlinsk.rd_machine.config.AiTtsProperties;
+import com.wlinsk.rd_machine.enums.SysCode;
+import com.wlinsk.rd_machine.exception.BasicException;
 import com.wlinsk.rd_machine.streaming.TextSegment;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.stereotype.Component;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
@@ -13,16 +18,9 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import org.springframework.stereotype.Component;
 
 @Component
 public class AliyunRealtimeTtsClient {
@@ -34,7 +32,7 @@ public class AliyunRealtimeTtsClient {
     private final ExecutorService executorService;
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
-    public AliyunRealtimeTtsClient(AiTtsProperties properties, ObjectMapper objectMapper, ExecutorService executorService) {
+    public AliyunRealtimeTtsClient(AiTtsProperties properties, ObjectMapper objectMapper, @Qualifier("ttsStreamingExecutor") ExecutorService executorService) {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.executorService = executorService;
@@ -45,11 +43,19 @@ public class AliyunRealtimeTtsClient {
         return new RealtimeTtsStreamSession(request, audioListener);
     }
 
+    static BasicException segmentQueueFullException() {
+        return new BasicException(SysCode.TTS_SEGMENT_QUEUE_FULL);
+    }
+
+    BlockingQueue<TextSegment> newSegmentQueue() {
+        return new ArrayBlockingQueue<>(properties.getSegmentQueueCapacity());
+    }
+
     private final class RealtimeTtsStreamSession implements TtsStreamSession, WebSocket.Listener {
 
         private final TtsSynthesisRequest request;
         private final TtsAudioListener audioListener;
-        private final LinkedBlockingQueue<TextSegment> queue = new LinkedBlockingQueue<>();
+        private final BlockingQueue<TextSegment> queue = newSegmentQueue();
         private final ConcurrentLinkedQueue<Integer> pendingServerCommitSegmentSeqs = new ConcurrentLinkedQueue<>();
         private final AtomicInteger currentSegmentSeq = new AtomicInteger();
         private final AtomicReference<CompletableFuture<Void>> currentResponseDone = new AtomicReference<>(new CompletableFuture<>());
@@ -82,13 +88,13 @@ public class AliyunRealtimeTtsClient {
             if (finished || textSegment == null || textSegment.text().isBlank()) {
                 return;
             }
-            queue.offer(textSegment);
+            enqueueOrThrow(textSegment);
         }
 
         @Override
         public void finish() {
             finished = true;
-            queue.offer(FINISH_SENTINEL);
+            enqueueOrThrow(FINISH_SENTINEL);
         }
 
         @Override
@@ -135,6 +141,17 @@ public class AliyunRealtimeTtsClient {
             }
             sessionFinished.complete(null);
             return CompletableFuture.completedFuture(null);
+        }
+
+        private void enqueueOrThrow(TextSegment textSegment) {
+            try {
+                if (!queue.offer(textSegment, 250L, TimeUnit.MILLISECONDS)) {
+                    throw segmentQueueFullException();
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new CancellationException("Interrupted while enqueueing TTS segment");
+            }
         }
 
         private void drainSegments() {
@@ -265,3 +282,8 @@ public class AliyunRealtimeTtsClient {
         }
     }
 }
+
+
+
+
+

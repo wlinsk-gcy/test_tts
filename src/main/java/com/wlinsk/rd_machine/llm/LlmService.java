@@ -4,11 +4,11 @@ import com.wlinsk.rd_machine.config.AiLlmProperties;
 import org.springframework.stereotype.Service;
 
 @Service
-public class BailianLlmService {
+public class LlmService {
 
     private final AiLlmProperties properties;
 
-    public BailianLlmService(AiLlmProperties properties) {
+    public LlmService(AiLlmProperties properties) {
         this.properties = properties;
     }
 
