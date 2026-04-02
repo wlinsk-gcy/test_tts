@@ -1,8 +1,7 @@
 package com.wlinsk.rd_machine.logging;
 
 import com.wlinsk.rd_machine.transport.ws.AssistantEvent;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
@@ -11,10 +10,10 @@ import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+@Slf4j
 @Component
 public class WebSocketAccessLogHelper {
 
-    private static final Logger log = LoggerFactory.getLogger(WebSocketAccessLogHelper.class);
 
     public void logConnectionEstablished(WebSocketSession session) {
         Map<String, Object> logEntry = baseSessionEntry("connection.established", session);

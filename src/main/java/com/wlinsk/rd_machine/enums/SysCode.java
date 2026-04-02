@@ -16,6 +16,10 @@ public enum SysCode implements ReturnCode {
     TTS_SEGMENT_QUEUE_FULL("9990", "TTS segment queue is full"),
     TTS_STREAM_FAILED("9989", "TTS stream failed"),
     ASSISTANT_STREAM_FAILED("9988", "Assistant stream failed"),
+    TTS_SESSION_NOT_FOUND("9987", "TTS session not found"),
+    TTS_SESSION_BUSY("9986", "TTS session is busy"),
+    TTS_SESSION_LIMIT_REACHED("9985", "TTS session limit reached"),
+    TTS_SESSION_LANGUAGE_MISMATCH("9984", "TTS session language mismatch"),
 
     PARAMETER_ERROR("9000", "Parameter validation error"),
     ;

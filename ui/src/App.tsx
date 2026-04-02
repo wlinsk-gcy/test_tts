@@ -1,13 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { DEBUG_ARTICLES } from "./articles";
-import { apiBaseUrl, closeSession, createSession, fetchSessionSnapshot, submitTurn } from "./api";
+import {
+  apiBaseUrl,
+  closeSession,
+  closeTtsSession,
+  createSession,
+  fetchSessionSnapshot,
+  streamTtsSentence,
+  submitTurn,
+  type TtsSentenceStreamHandle
+} from "./api";
 import { PcmPlayer } from "./audio/pcmPlayer";
 import { ArticleList } from "./components/ArticleList";
 import { AssistantStreamPanel } from "./components/AssistantStreamPanel";
 import { EventTimeline } from "./components/EventTimeline";
 import { SessionPanel } from "./components/SessionPanel";
 import { StudentInputPanel } from "./components/StudentInputPanel";
-import type { AssistantEvent, DebugArticle, MetricsState, TimelineEntry } from "./types";
+import { TtsSentenceLab } from "./components/TtsSentenceLab";
+import type { AssistantEvent, DebugArticle, MetricsState, TimelineEntry, TtsChunkEvent } from "./types";
 import { openSessionSocket } from "./ws";
 
 const MAX_TIMELINE = 120;
@@ -29,14 +39,25 @@ export default function App() {
   const [lastError, setLastError] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricsState>({});
   const [playerVersion, setPlayerVersion] = useState(0);
+  const [ttsSentence, setTtsSentence] = useState("");
+  const [ttsSentenceLanguage, setTtsSentenceLanguage] = useState("zh-CN");
+  const [ttsSentenceSessionId, setTtsSentenceSessionId] = useState<string | null>(null);
+  const [ttsSentenceStreamState, setTtsSentenceStreamState] = useState("idle");
+  const [ttsSentenceError, setTtsSentenceError] = useState<string | null>(null);
+  const [ttsSentenceTimeline, setTtsSentenceTimeline] = useState<TimelineEntry[]>([]);
+  const [ttsSentencePlayerVersion, setTtsSentencePlayerVersion] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
   const playerRef = useRef(new PcmPlayer());
+  const ttsSentencePlayerRef = useRef(new PcmPlayer());
+  const ttsSentenceStreamHandleRef = useRef<TtsSentenceStreamHandle | null>(null);
+  const ttsSentenceStreamTokenRef = useRef(0);
   const terminalSessionRef = useRef(false);
   const articles = DEBUG_ARTICLES;
 
   useEffect(() => {
     return () => {
       socketRef.current?.close();
+      cancelTtsSentenceStream();
     };
   }, []);
 
@@ -232,10 +253,171 @@ export default function App() {
     }
   }
 
+  async function handleStartSentenceTts() {
+    const sentence = ttsSentence.trim();
+    if (!sentence) {
+      return;
+    }
+
+    const streamToken = startNewTtsSentenceStream();
+    setTtsSentenceError(null);
+    setTtsSentenceStreamState("streaming");
+    pushTimeline(setTtsSentenceTimeline, {
+      at: Date.now(),
+      label: "tts.stream.start",
+      detail: `${ttsSentenceLanguage} ${sentence.slice(0, 80)}`
+    });
+
+    try {
+      await ttsSentencePlayerRef.current.ensureReady();
+      const streamHandle = streamTtsSentence(
+        {
+          sessionId: ttsSentenceSessionId,
+          language: ttsSentenceLanguage,
+          sentence
+        },
+        async (event) => {
+          if (ttsSentenceStreamTokenRef.current !== streamToken) {
+            return;
+          }
+          await handleTtsSentenceEvent(event);
+        }
+      );
+      ttsSentenceStreamHandleRef.current = streamHandle;
+      await streamHandle.done;
+      if (ttsSentenceStreamTokenRef.current !== streamToken) {
+        return;
+      }
+      ttsSentenceStreamHandleRef.current = null;
+      setTtsSentenceStreamState((current) => current === "error" ? current : "idle");
+    } catch (error) {
+      if (ttsSentenceStreamTokenRef.current !== streamToken) {
+        return;
+      }
+      ttsSentenceStreamHandleRef.current = null;
+      if (isAbortError(error)) {
+        setTtsSentenceStreamState("idle");
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      setTtsSentenceError(message);
+      setTtsSentenceStreamState("error");
+      pushTimeline(setTtsSentenceTimeline, {
+        at: Date.now(),
+        label: "tts.stream.error",
+        detail: message
+      });
+    }
+  }
+
+  async function handleCloseSentenceTtsSession() {
+    if (!ttsSentenceSessionId) {
+      return;
+    }
+
+    const sessionIdToClose = ttsSentenceSessionId;
+    startNewTtsSentenceStream();
+    setTtsSentenceStreamState("closing");
+
+    try {
+      await closeTtsSession(sessionIdToClose);
+      setTtsSentenceSessionId(null);
+      setTtsSentenceStreamState("idle");
+      setTtsSentenceError(null);
+      pushTimeline(setTtsSentenceTimeline, {
+        at: Date.now(),
+        label: "tts.session.close",
+        detail: sessionIdToClose
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setTtsSentenceError(message);
+      setTtsSentenceStreamState("error");
+      pushTimeline(setTtsSentenceTimeline, {
+        at: Date.now(),
+        label: "tts.session.close.error",
+        detail: message
+      });
+    }
+  }
+
+  function handleResetSentenceTtsPlayer() {
+    ttsSentencePlayerRef.current.reset();
+    setTtsSentencePlayerVersion((value) => value + 1);
+    pushTimeline(setTtsSentenceTimeline, {
+      at: Date.now(),
+      label: "tts.player.reset"
+    });
+  }
+
+  async function handleTtsSentenceEvent(event: TtsChunkEvent) {
+    const now = Date.now();
+    if (event.sessionId) {
+      setTtsSentenceSessionId(event.sessionId);
+    }
+
+    switch (event.type) {
+      case "audio.chunk": {
+        const chunkBase64 = String(event.data.chunkBase64 ?? "");
+        const sampleRate = Number(event.data.sampleRate ?? 24000);
+        await ttsSentencePlayerRef.current.enqueueBase64Pcm(chunkBase64, sampleRate);
+        setTtsSentencePlayerVersion((value) => value + 1);
+        pushTimeline(setTtsSentenceTimeline, {
+          at: now,
+          label: "audio.chunk",
+          detail: `segment=${String(event.data.segmentSeq ?? "?")}, bytes=${Math.round((chunkBase64.length * 3) / 4)}`
+        });
+        break;
+      }
+      case "audio.done": {
+        setTtsSentenceStreamState("idle");
+        pushTimeline(setTtsSentenceTimeline, {
+          at: now,
+          label: "audio.done",
+          detail: event.sessionId ?? undefined
+        });
+        break;
+      }
+      case "audio.error": {
+        const message = `${String(event.data.code ?? "audio.error")}: ${String(event.data.message ?? "unknown")}`;
+        setTtsSentenceError(message);
+        setTtsSentenceStreamState("error");
+        pushTimeline(setTtsSentenceTimeline, {
+          at: now,
+          label: "audio.error",
+          detail: message
+        });
+        break;
+      }
+    }
+  }
+
+  function startNewTtsSentenceStream(): number {
+    ttsSentenceStreamTokenRef.current += 1;
+    cancelTtsSentenceStream();
+    return ttsSentenceStreamTokenRef.current;
+  }
+
+  function cancelTtsSentenceStream() {
+    ttsSentenceStreamHandleRef.current?.cancel();
+    ttsSentenceStreamHandleRef.current = null;
+  }
+
+  function isAbortError(error: unknown): boolean {
+    return Boolean(
+      error &&
+      typeof error === "object" &&
+      "name" in error &&
+      (error as { name?: string }).name === "AbortError"
+    );
+  }
+
   const playerStats = playerRef.current.getStats();
+  const ttsSentencePlayerStats = ttsSentencePlayerRef.current.getStats();
   const sessionClosed = status === "CLOSED" || status === "FAILED";
   const studentInputDisabled = !sessionId || status !== "WAITING_STUDENT";
   void playerVersion;
+  void ttsSentencePlayerVersion;
 
   return (
     <main className="app-shell">
@@ -271,6 +453,21 @@ export default function App() {
           disabled={studentInputDisabled}
           onChange={setStudentText}
           onSubmit={() => { void handleSubmitStudentTurn(); }}
+        />
+        <TtsSentenceLab
+          sentence={ttsSentence}
+          language={ttsSentenceLanguage}
+          sessionId={ttsSentenceSessionId}
+          streamState={ttsSentenceStreamState}
+          lastError={ttsSentenceError}
+          queuedChunks={ttsSentencePlayerStats.queuedChunks}
+          queuedBytes={ttsSentencePlayerStats.queuedBytes}
+          timeline={ttsSentenceTimeline}
+          onSentenceChange={setTtsSentence}
+          onLanguageChange={setTtsSentenceLanguage}
+          onStart={() => { void handleStartSentenceTts(); }}
+          onClose={() => { void handleCloseSentenceTtsSession(); }}
+          onResetPlayer={handleResetSentenceTtsPlayer}
         />
         <AssistantStreamPanel textStream={textStream} finalText={finalText} />
         <EventTimeline entries={timeline} />

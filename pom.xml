@@ -10,7 +10,7 @@
     </parent>
     <groupId>com.wlinsk</groupId>
     <artifactId>rd_machine</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>dev-0.0.2</version>
     <name>rd_machine</name>
     <description>rd_machine</description>
     <properties>

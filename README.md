@@ -1,3 +1,13 @@
+# TTS Session 说明
+
+- 教师对话会话和 HTTP 文章朗读会话，分别维护各自独立的可复用上游 TTS Session。
+- `POST /api/sessions` 和 `POST /api/sessions/{sessionId}/turns` 会在同一个对话 `sessionId` 内跨 Turn 复用一条 TTS Session。
+- `POST /api/tts/sessions/stream` 和 `POST /api/tts/sessions/close` 会在同一个朗读 `sessionId` 内跨句子复用另一条 TTS Session。
+- DashScope realtime TTS 统一使用 `rd.ai.tts.mode=server_commit`。
+- 每个教师对话 Turn 或每次 HTTP 句子请求结束时，后端仍会发送一次 `input_text_buffer.commit`，用于 flush 当前缓冲文本，但不会关闭上游 TTS Session。
+- 文章朗读链路会输出 `stream.start`、`text.chunked`、`tts.session.ready`、`tts.first.audio`、`stream.completed`、`stream.timeout`、`stream.error` 等结构化日志。
+- 如需排查上游 realtime 事件，可开启 `rd.ai.tts.debug-log-upstream-events=true`，此时会记录 `session.updated`、`response.created`、`response.audio.done`、`response.done` 等 `tts.upstream` 日志。
+
 # rd_machine 接口文档
 
 本文档基于当前后端实现和现有调试前端代码整理，目标是让前后端联调时直接按代码中的真实协议对接。
@@ -581,4 +591,165 @@ pong
 - `SubmitTurnRequest.clientSeq` 是幂等去重键，客户端应保证每次真实提交都不重复
 - `assistant.turn.done` 不是完整快照，仍需配合 HTTP 快照接口使用
 - `assistant.audio.chunk` 当前按 PCM 数据播放，客户端如果不用现成调试前端，需要自行实现解码/播放
-- WS 允许的 Origin 当前仅有 `http://localhost:5173`，更换前端地址时记得同步后端配置
+
+# 可复用 TTS Session 接口
+
+当前仓库同时支持两类可复用 TTS Session：
+
+- AI 教师对话链路会在同一个阅读 `sessionId` 内跨多个 Turn 复用一条上游 realtime TTS Session。
+- 文章朗读链路会在同一个朗读 `sessionId` 内跨多个句子请求复用另一条上游 realtime TTS Session。
+
+## AI 教师对话链路
+
+- 同一个阅读 `sessionId` 会跨 Turn 复用一条上游 realtime TTS Session。
+- 每个教师 Turn 都会在这条可复用 TTS Session 上打开一个新的 utterance。
+- 关闭阅读会话时，也会同步关闭绑定的上游 TTS Session。
+- 如果当前教师 Turn 被取消，后端会关闭当前上游 TTS Session，后续 Turn 会重新创建干净的新 Session。
+
+## HTTP TTS Session 接口
+
+### 1. `POST /api/tts/sessions/stream`
+
+- Content-Type: `application/json`
+- Response Content-Type: `text/event-stream`
+- Controller return type: `SseEmitter`
+
+Request body:
+
+```json
+{
+  "sessionId": null,
+  "language": "zh-CN",
+  "sentence": "这是前端准备朗读的一句话。"
+}
+```
+
+行为说明：
+
+- `sessionId` 为空时，后端会创建一个新的可复用 TTS Session，并且在后续每一条流式事件里都返回这个 `sessionId`。
+- `sessionId` 不为空时，后端会复用这个已有的 TTS Session。
+- 前端传入的虽然是一整句，后端仍可能再次切分后再送给 realtime TTS。
+
+事件结构：
+
+```json
+{
+  "type": "audio.chunk",
+  "sessionId": "tts-session-id",
+  "data": {
+    "segmentSeq": 1,
+    "audioFormat": "pcm",
+    "sampleRate": 24000,
+    "chunkBase64": "AAABAAIA..."
+  }
+}
+```
+
+支持的事件类型：
+
+- `audio.chunk`
+- `audio.done`
+- `audio.error`
+
+事件含义：
+
+- `audio.chunk`
+  当前句子返回了一段可立即播放的 PCM 音频。前端应立即把 `data.chunkBase64` 送给播放器，并缓存事件顶层的 `sessionId`。
+- `audio.done`
+  当前句子的音频流已经结束。这是同一个 `sessionId` 上“可以发送下一句”的推荐判断信号。
+- `audio.error`
+  当前句子失败。本次请求也已经结束，前端可以选择重试当前句、跳过当前句，或直接关闭该 `sessionId`，但不要和当前句并发发送下一句。
+
+前端接入要点：
+
+- 因为这是 `POST` 接口，前端应使用 `fetch` + `ReadableStream` 读取 `text/event-stream`，不要用浏览器原生 `EventSource`。
+- `segmentSeq`、`audioFormat`、`sampleRate`、`chunkBase64` 与 `ui/src/audio/pcmPlayer.ts` 的现有 PCM 播放契约对齐，可以直接复用播放器。
+- 第一句请求时传 `sessionId: null`；拿到任意一条事件后，把返回的 `sessionId` 缓存起来，后续句子继续复用。
+- 同一个 `sessionId` 上，句子请求必须串行。不要在收到某个 `audio.chunk` 后就立刻发送下一句，因为这只代表“当前句已经有音频返回”，不代表“当前句已经结束”。
+- 前端只有在当前这次 `/stream` 请求收到终态事件后，才可以发送下一句。终态事件有两个：
+  - `audio.done`：正常结束，推荐以它作为“发送下一句”的判断条件。
+  - `audio.error`：异常结束，本次请求也算结束，但需要前端自行决定是重试、跳过还是关闭 Session。
+- 如果同一个 `sessionId` 上前一句还没结束就继续发下一句，后端可能返回错误码 `9986`，即 `TTS session is busy`。
+
+前端接入时可直接参考现成调试前端代码：
+
+- `ui/src/api.ts`
+  这里封装了 `streamTtsSentence()` 和 `closeTtsSession()`，包含 `fetch` 读取 SSE、SSE 帧解析、以及 `POST /api/tts/sessions/stream` / `POST /api/tts/sessions/close` 的实际请求写法。
+- `ui/src/App.tsx`
+  这里包含完整的句子朗读状态控制逻辑，重点看 `handleStartSentenceTts()`、`handleTtsSentenceEvent()`、`handleCloseSentenceTtsSession()`。
+- `ui/src/components/TtsSentenceLab.tsx`
+  这里是调试入口的表单和按钮交互，可以直接作为前端接入参考。
+
+其中“什么时候可以发送下一句”的现成判断逻辑也在 `ui/src/App.tsx`：
+
+- 收到 `audio.chunk` 时，只播放当前音频，不发送下一句。
+- 收到 `audio.done` 时，把当前流状态切回 `idle`，此时才允许发送下一句。
+- 收到 `audio.error` 时，当前句也算结束，但前端应先决定重试、跳过还是关闭 Session，再决定是否发送下一句。
+
+如果前端通过 Nginx 反向代理访问该接口，需要给 SSE 接口单独加一段代理配置，不要只复用普通的 `/llk-ai/` 反代。原因是 `POST /api/tts/sessions/stream` 返回的是 `text/event-stream`，如果 Nginx 开着响应缓冲，前端可能会出现“请求已成功但迟迟收不到事件”或者“事件攒到一句结束后才一起返回”。
+
+推荐配置示例：
+
+```nginx
+location = /llk-ai/api/tts/sessions/stream {
+    proxy_pass http://127.0.0.1:8080/api/tts/sessions/stream;
+
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Connection "";
+
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+
+    add_header X-Accel-Buffering no always;
+}
+
+location /llk-ai/ws/ {
+    proxy_pass http://127.0.0.1:8080/ws/;
+
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+}
+
+location /llk-ai/ {
+    proxy_pass http://127.0.0.1:8080/;
+}
+```
+
+Nginx 配置注意事项：
+
+- `/llk-ai/api/tts/sessions/stream` 这个精确匹配的 `location` 要放在通用 `/llk-ai/` 之前。
+- SSE 这条链路的关键配置是 `proxy_buffering off;`、`gzip off;`、`add_header X-Accel-Buffering no always;`。
+- `POST /api/tts/sessions/close` 不需要特殊 SSE 配置，继续走普通 `/llk-ai/` 即可。
+
+### 2. `POST /api/tts/sessions/close`
+
+- Content-Type: `application/json`
+- Response: 普通 `Result<Void>`
+
+Request body:
+
+```json
+{
+  "sessionId": "tts-session-id"
+}
+```
+
+行为说明：
+
+- 关闭可复用的上游 realtime TTS Session。
+- 从后端 Session Registry 中移除该 `sessionId`。
+- 用户退出朗读模式、整篇文章播放完成、或前端不再需要复用这个 `sessionId` 时，应主动调用该接口释放资源。

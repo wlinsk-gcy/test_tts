@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wlinsk.rd_machine.config.AiTtsProperties;
 import com.wlinsk.rd_machine.enums.SysCode;
 import com.wlinsk.rd_machine.exception.BasicException;
+import com.wlinsk.rd_machine.logging.ReadingTtsLogHelper;
 import com.wlinsk.rd_machine.streaming.TextSegment;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
@@ -17,30 +18,46 @@ import java.time.Duration;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.*;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Component
 public class AliyunRealtimeTtsClient {
 
-    private static final TextSegment FINISH_SENTINEL = new TextSegment(-1, "");
-
     private final AiTtsProperties properties;
     private final ObjectMapper objectMapper;
     private final ExecutorService executorService;
     private final HttpClient httpClient = HttpClient.newHttpClient();
+    private static final Set<String> UPSTREAM_DEBUG_EVENTS = Set.of(
+            "session.updated",
+            "response.created",
+            "response.audio.done",
+            "response.done",
+            "error"
+    );
 
-    public AliyunRealtimeTtsClient(AiTtsProperties properties, ObjectMapper objectMapper, @Qualifier("ttsStreamingExecutor") ExecutorService executorService) {
+    public AliyunRealtimeTtsClient(
+            AiTtsProperties properties,
+            ObjectMapper objectMapper,
+            @Qualifier("ttsStreamingExecutor") ExecutorService executorService
+    ) {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.executorService = executorService;
-
     }
 
-    public TtsStreamSession openSession(TtsSynthesisRequest request, TtsAudioListener audioListener) {
-        return new RealtimeTtsStreamSession(request, audioListener);
+    public TtsRealtimeSession openSession(TtsSynthesisRequest request) {
+        return new RealtimeTtsSessionConnection(request);
     }
 
     static BasicException segmentQueueFullException() {
@@ -51,60 +68,60 @@ public class AliyunRealtimeTtsClient {
         return new ArrayBlockingQueue<>(properties.getSegmentQueueCapacity());
     }
 
-    private final class RealtimeTtsStreamSession implements TtsStreamSession, WebSocket.Listener {
+    private final class RealtimeTtsSessionConnection implements TtsRealtimeSession, WebSocket.Listener {
 
         private final TtsSynthesisRequest request;
-        private final TtsAudioListener audioListener;
-        private final BlockingQueue<TextSegment> queue = newSegmentQueue();
-        private final ConcurrentLinkedQueue<Integer> pendingServerCommitSegmentSeqs = new ConcurrentLinkedQueue<>();
-        private final AtomicInteger currentSegmentSeq = new AtomicInteger();
-        private final AtomicReference<CompletableFuture<Void>> currentResponseDone = new AtomicReference<>(new CompletableFuture<>());
         private final CompletableFuture<Void> sessionReady = new CompletableFuture<>();
-        private final CompletableFuture<Void> sessionFinished = new CompletableFuture<>();
         private final CompletableFuture<WebSocket> webSocketFuture;
+        private final AtomicReference<QueuedTtsUtterance> currentUtterance = new AtomicReference<>();
+        private final AtomicInteger currentSegmentSeq = new AtomicInteger();
         private final StringBuilder textBuffer = new StringBuilder();
+        private final AtomicBoolean utteranceActive = new AtomicBoolean();
+        private final AtomicBoolean closed = new AtomicBoolean();
+        private final String upstreamSessionId = UUID.randomUUID().toString();
         private volatile WebSocket webSocket;
-        private volatile boolean finished;
 
-        private RealtimeTtsStreamSession(TtsSynthesisRequest request, TtsAudioListener audioListener) {
+        private RealtimeTtsSessionConnection(TtsSynthesisRequest request) {
             this.request = request;
-            this.audioListener = audioListener;
             this.webSocketFuture = httpClient.newWebSocketBuilder()
                     .header("Authorization", "Bearer " + properties.getApiKey())
                     .buildAsync(resolveUri(), this);
             this.webSocketFuture.whenComplete((openedWebSocket, throwable) -> {
                 if (throwable != null) {
-                    fail(throwable);
+                    failSession(throwable);
                     return;
                 }
                 this.webSocket = openedWebSocket;
                 sendSessionUpdate();
             });
-            executorService.submit(this::drainSegments);
         }
 
         @Override
-        public void enqueue(TextSegment textSegment) {
-            if (finished || textSegment == null || textSegment.text().isBlank()) {
-                return;
+        public TtsUtterance openUtterance(TtsAudioListener audioListener) {
+            if (closed.get()) {
+                throw new BasicException(SysCode.TTS_STREAM_FAILED);
             }
-            enqueueOrThrow(textSegment);
+            if (!utteranceActive.compareAndSet(false, true)) {
+                throw new BasicException(SysCode.TTS_SESSION_BUSY);
+            }
+            QueuedTtsUtterance utterance = new QueuedTtsUtterance(
+                    audioListener,
+                    newSegmentQueue(),
+                    closed,
+                    queuedUtterance -> executorService.submit(() -> drainUtterance(queuedUtterance))
+            );
+            currentUtterance.set(utterance);
+            return utterance;
         }
 
         @Override
-        public void finish() {
-            finished = true;
-            enqueueOrThrow(FINISH_SENTINEL);
-        }
-
-        @Override
-        public void awaitFinished(Duration timeout) {
-            sessionFinished.orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS).join();
+        public boolean isClosed() {
+            return closed.get();
         }
 
         @Override
         public void close() {
-            webSocketFuture.thenAccept(socket -> socket.sendClose(WebSocket.NORMAL_CLOSURE, "done"));
+            closeSession(new CancellationException("TTS session closed"));
         }
 
         @Override
@@ -131,82 +148,84 @@ public class AliyunRealtimeTtsClient {
 
         @Override
         public void onError(WebSocket webSocket, Throwable error) {
-            fail(error);
+            failSession(error);
         }
 
         @Override
         public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
-            if (!sessionReady.isDone()) {
-                sessionReady.completeExceptionally(new CancellationException("TTS session closed before ready"));
-            }
-            sessionFinished.complete(null);
+            closeSession(new CancellationException("TTS session closed by upstream"));
             return CompletableFuture.completedFuture(null);
-        }
-
-        private void enqueueOrThrow(TextSegment textSegment) {
-            try {
-                if (!queue.offer(textSegment, 250L, TimeUnit.MILLISECONDS)) {
-                    throw segmentQueueFullException();
-                }
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                throw new CancellationException("Interrupted while enqueueing TTS segment");
-            }
-        }
-
-        private void drainSegments() {
-            try {
-                sessionReady.join();
-                while (true) {
-                    TextSegment segment = queue.take();
-                    if (segment.segmentSeq() < 0) {
-                        break;
-                    }
-                    if (request.usesClientCommit()) {
-                        currentSegmentSeq.set(segment.segmentSeq());
-                        CompletableFuture<Void> responseDone = new CompletableFuture<>();
-                        currentResponseDone.set(responseDone);
-                        sendAppend(segment.text());
-                        sendCommit();
-                        responseDone.join();
-                    } else {
-                        pendingServerCommitSegmentSeqs.offer(segment.segmentSeq());
-                        sendAppend(segment.text());
-                    }
-                }
-                sendSessionFinish();
-            } catch (Exception exception) {
-                fail(exception);
-            }
         }
 
         private void handleServerEvent(String payload) {
             try {
                 JsonNode root = objectMapper.readTree(payload);
                 String type = root.path("type").asText();
+                logUpstreamEvent(type, root);
                 switch (type) {
-                    case "session.updated" -> {
-                        audioListener.onSessionReady();
-                        sessionReady.complete(null);
-                    }
-                    case "response.created" -> assignServerCommitSegmentSeq();
-                    case "response.audio.delta" -> {
-                        String delta = root.path("delta").asText();
-                        if (!delta.isBlank()) {
-                            audioListener.onAudioChunk(currentSegmentSeq.get(), Base64.getDecoder().decode(delta));
-                        }
-                    }
-                    case "response.done" -> currentResponseDone.get().complete(null);
-                    case "session.finished" -> {
-                        audioListener.onCompleted();
-                        sessionFinished.complete(null);
-                    }
-                    case "error" -> fail(new IllegalStateException(payload));
+                    case "session.updated" -> sessionReady.complete(null);
+                    case "response.created" -> markResponseCreated();
+                    case "response.audio.delta" -> forwardAudioChunk(root.path("delta").asText());
+                    case "response.audio.done" -> markAudioDone();
+                    case "response.done" -> markResponseDone();
+                    case "error" -> failSession(new IllegalStateException(payload));
                     default -> {
                     }
                 }
             } catch (Exception exception) {
-                fail(exception);
+                failSession(exception);
+            }
+        }
+
+        private void logUpstreamEvent(String type, JsonNode payload) {
+            if (!properties.isDebugLogUpstreamEvents() || !UPSTREAM_DEBUG_EVENTS.contains(type)) {
+                return;
+            }
+            Map<String, Object> data = new LinkedHashMap<>();
+            if ("error".equals(type)) {
+                data.put("payload", payload != null ? payload.toString() : null);
+            }
+            ReadingTtsLogHelper.logUpstreamEvent(
+                    upstreamSessionId,
+                    request.voice(),
+                    request.languageType(),
+                    type,
+                    data
+            );
+        }
+
+        private void forwardAudioChunk(String deltaBase64) {
+            if (deltaBase64 == null || deltaBase64.isBlank()) {
+                return;
+            }
+            QueuedTtsUtterance utterance = currentUtterance.get();
+            if (utterance == null) {
+                return;
+            }
+            utterance.audioListener().onAudioChunk(
+                    currentSegmentSeq.get(),
+                    Base64.getDecoder().decode(deltaBase64)
+            );
+        }
+
+        private void markResponseCreated() {
+            QueuedTtsUtterance utterance = currentUtterance.get();
+            if (utterance != null) {
+                currentSegmentSeq.set(utterance.markResponseCreated());
+            }
+        }
+
+        private void markResponseDone() {
+            QueuedTtsUtterance utterance = currentUtterance.get();
+            if (utterance != null) {
+                utterance.markResponseDone();
+            }
+        }
+
+        private void markAudioDone() {
+            QueuedTtsUtterance utterance = currentUtterance.get();
+            if (utterance != null) {
+                utterance.markAudioDone();
             }
         }
 
@@ -246,23 +265,66 @@ public class AliyunRealtimeTtsClient {
             ));
         }
 
-        private void assignServerCommitSegmentSeq() {
-            if (request.usesClientCommit()) {
-                return;
-            }
-            Integer segmentSeq = pendingServerCommitSegmentSeqs.poll();
-            if (segmentSeq != null) {
-                currentSegmentSeq.set(segmentSeq);
-            }
-            pendingServerCommitSegmentSeqs.clear();
-        }
-
         private void sendJson(Map<String, Object> payload) {
             try {
                 webSocket.sendText(objectMapper.writeValueAsString(payload), true).join();
             } catch (Exception exception) {
-                fail(exception);
+                failSession(exception);
             }
+        }
+
+        private void drainUtterance(QueuedTtsUtterance utterance) {
+            try {
+                sessionReady.orTimeout(10, TimeUnit.SECONDS).join();
+                utterance.audioListener().onSessionReady();
+                while (true) {
+                    TextSegment segment = utterance.queue().take();
+                    if (segment.segmentSeq() < 0) {
+                        break;
+                    }
+                    utterance.markSegmentAppended(segment.segmentSeq());
+                    sendAppend(segment.text());
+                }
+                if (closed.get() || utterance.isTerminal()) {
+                    return;
+                }
+                if (utterance.hasAnyInputAppended()) {
+                    utterance.markInputCommitted();
+                    sendCommit();
+                    utterance.awaitResponseCompletion(Duration.ofSeconds(30));
+                }
+                utterance.completeSuccessfully();
+            } catch (Exception exception) {
+                failSession(exception);
+            } finally {
+                currentUtterance.compareAndSet(utterance, null);
+                utteranceActive.set(false);
+            }
+        }
+
+        private void closeSession(Throwable throwable) {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
+            sessionReady.completeExceptionally(throwable);
+            QueuedTtsUtterance utterance = currentUtterance.getAndSet(null);
+            if (utterance != null) {
+                utterance.fail(throwable);
+            }
+            utteranceActive.set(false);
+            webSocketFuture.thenAccept(socket -> {
+                try {
+                    if (this.webSocket != null) {
+                        sendSessionFinish();
+                    }
+                } catch (Exception ignored) {
+                }
+                socket.sendClose(WebSocket.NORMAL_CLOSURE, "done");
+            }).exceptionally(ignored -> null);
+        }
+
+        private void failSession(Throwable throwable) {
+            closeSession(throwable);
         }
 
         private URI resolveUri() {
@@ -273,17 +335,5 @@ public class AliyunRealtimeTtsClient {
             String delimiter = base.contains("?") ? "&" : "?";
             return URI.create(base + delimiter + "model=" + properties.getModel());
         }
-
-        private void fail(Throwable throwable) {
-            audioListener.onError(throwable);
-            sessionReady.completeExceptionally(throwable);
-            currentResponseDone.get().completeExceptionally(throwable);
-            sessionFinished.completeExceptionally(throwable);
-        }
     }
 }
-
-
-
-
-

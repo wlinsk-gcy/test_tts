@@ -3,6 +3,7 @@ package com.wlinsk.rd_machine.session;
 import com.wlinsk.rd_machine.article.ArticleDetail;
 import com.wlinsk.rd_machine.streaming.ActiveAssistantTurnRegistry;
 import com.wlinsk.rd_machine.streaming.AssistantStreamingOrchestrator;
+import com.wlinsk.rd_machine.tts.AssistantTtsSessionManager;
 import com.wlinsk.rd_machine.transport.http.dto.SessionSnapshotResponse;
 import com.wlinsk.rd_machine.transport.http.dto.SubmitTurnRequest;
 import java.util.UUID;
@@ -17,15 +18,18 @@ public class SessionService {
     private final InMemorySessionStore sessionStore;
     private final ActiveAssistantTurnRegistry activeTurnRegistry;
     private final ObjectProvider<AssistantStreamingOrchestrator> orchestratorProvider;
+    private final AssistantTtsSessionManager assistantTtsSessionManager;
 
     public SessionService(
             InMemorySessionStore sessionStore,
             ActiveAssistantTurnRegistry activeTurnRegistry,
-            ObjectProvider<AssistantStreamingOrchestrator> orchestratorProvider
+            ObjectProvider<AssistantStreamingOrchestrator> orchestratorProvider,
+            AssistantTtsSessionManager assistantTtsSessionManager
     ) {
         this.sessionStore = sessionStore;
         this.activeTurnRegistry = activeTurnRegistry;
         this.orchestratorProvider = orchestratorProvider;
+        this.assistantTtsSessionManager = assistantTtsSessionManager;
     }
 
     public ReadingSession createSession(String title, String author, String language, String content) {
@@ -67,6 +71,7 @@ public class SessionService {
         ReadingSession session = getRequiredSession(sessionId);
         session.close();
         activeTurnRegistry.cancel(sessionId);
+        assistantTtsSessionManager.close(sessionId);
         return getSnapshot(sessionId);
     }
 

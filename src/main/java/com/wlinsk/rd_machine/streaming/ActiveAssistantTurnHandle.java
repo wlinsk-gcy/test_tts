@@ -1,6 +1,7 @@
 package com.wlinsk.rd_machine.streaming;
 
-import com.wlinsk.rd_machine.tts.TtsStreamSession;
+import com.wlinsk.rd_machine.tts.TtsRealtimeSession;
+
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -8,7 +9,7 @@ public class ActiveAssistantTurnHandle {
 
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private volatile Future<?> future;
-    private volatile TtsStreamSession ttsStreamSession;
+    private volatile TtsRealtimeSession ttsRealtimeSession;
 
     public boolean isCancelled() {
         return cancelled.get();
@@ -21,10 +22,10 @@ public class ActiveAssistantTurnHandle {
         }
     }
 
-    public void attachTtsStreamSession(TtsStreamSession ttsStreamSession) {
-        this.ttsStreamSession = ttsStreamSession;
-        if (isCancelled() && ttsStreamSession != null) {
-            closeQuietly(ttsStreamSession);
+    public void attachTtsRealtimeSession(TtsRealtimeSession ttsRealtimeSession) {
+        this.ttsRealtimeSession = ttsRealtimeSession;
+        if (isCancelled() && ttsRealtimeSession != null) {
+            closeQuietly(ttsRealtimeSession);
         }
     }
 
@@ -36,9 +37,9 @@ public class ActiveAssistantTurnHandle {
         if (runningFuture != null) {
             runningFuture.cancel(true);
         }
-        TtsStreamSession runningTtsStreamSession = ttsStreamSession;
-        if (runningTtsStreamSession != null) {
-            closeQuietly(runningTtsStreamSession);
+        TtsRealtimeSession runningTtsRealtimeSession = ttsRealtimeSession;
+        if (runningTtsRealtimeSession != null) {
+            closeQuietly(runningTtsRealtimeSession);
         }
     }
 

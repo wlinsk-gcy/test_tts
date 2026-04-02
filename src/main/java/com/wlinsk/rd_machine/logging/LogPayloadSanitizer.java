@@ -3,6 +3,7 @@ package com.wlinsk.rd_machine.logging;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.ContentCachingRequestWrapper;
 import org.springframework.web.util.ContentCachingResponseWrapper;
@@ -87,6 +88,14 @@ public final class LogPayloadSanitizer {
     }
 
     public static Map<String, Object> responseHeaders(ContentCachingResponseWrapper response) {
+        Map<String, Object> headers = new LinkedHashMap<>();
+        for (String headerName : response.getHeaderNames()) {
+            headers.put(headerName, response.getHeader(headerName));
+        }
+        return headers;
+    }
+
+    public static Map<String, Object> responseHeaders(HttpServletResponse response) {
         Map<String, Object> headers = new LinkedHashMap<>();
         for (String headerName : response.getHeaderNames()) {
             headers.put(headerName, response.getHeader(headerName));

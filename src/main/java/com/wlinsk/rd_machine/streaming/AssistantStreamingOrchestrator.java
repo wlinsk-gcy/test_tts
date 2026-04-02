@@ -1,6 +1,5 @@
 package com.wlinsk.rd_machine.streaming;
 
-import com.github.houbb.opencc4j.util.ZhConverterUtil;
 import com.wlinsk.rd_machine.enums.SysCode;
 import com.wlinsk.rd_machine.exception.BasicException;
 import com.wlinsk.rd_machine.llm.LlmClient;
@@ -14,11 +13,8 @@ import com.wlinsk.rd_machine.session.InMemorySessionStore;
 import com.wlinsk.rd_machine.session.ReadingSession;
 import com.wlinsk.rd_machine.transport.ws.AssistantEventPublisher;
 import com.wlinsk.rd_machine.transport.ws.SessionConnectionRegistry;
-import com.wlinsk.rd_machine.tts.AliyunRealtimeTtsService;
-import com.wlinsk.rd_machine.tts.TtsAudioListener;
-import com.wlinsk.rd_machine.tts.TtsStreamSession;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.wlinsk.rd_machine.tts.*;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -32,10 +28,10 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+@Slf4j
 @Service
 public class AssistantStreamingOrchestrator {
 
-    private static final Logger log = LoggerFactory.getLogger(AssistantStreamingOrchestrator.class);
 
     @Value("${spring.profiles.active:}")
     private String activeProfiles;
@@ -45,6 +41,7 @@ public class AssistantStreamingOrchestrator {
     private final PromptBuilder promptBuilder;
     private final LlmClient llmClient;
     private final AliyunRealtimeTtsService ttsService;
+    private final AssistantTtsSessionManager assistantTtsSessionManager;
     private final AssistantEventPublisher eventPublisher;
     private final SessionConnectionRegistry connectionRegistry;
     private final ActiveAssistantTurnRegistry activeTurnRegistry;
@@ -56,6 +53,7 @@ public class AssistantStreamingOrchestrator {
             PromptBuilder promptBuilder,
             LlmClient llmClient,
             AliyunRealtimeTtsService ttsService,
+            AssistantTtsSessionManager assistantTtsSessionManager,
             AssistantEventPublisher eventPublisher,
             SessionConnectionRegistry connectionRegistry,
             ActiveAssistantTurnRegistry activeTurnRegistry,
@@ -66,6 +64,7 @@ public class AssistantStreamingOrchestrator {
         this.promptBuilder = promptBuilder;
         this.llmClient = llmClient;
         this.ttsService = ttsService;
+        this.assistantTtsSessionManager = assistantTtsSessionManager;
         this.eventPublisher = eventPublisher;
         this.connectionRegistry = connectionRegistry;
         this.activeTurnRegistry = activeTurnRegistry;
@@ -97,7 +96,8 @@ public class AssistantStreamingOrchestrator {
         List<LlmMessage> messages = promptBuilder.buildMessages(promptContext);
         StringBuilder fullText = new StringBuilder();
         TextSegmenter textSegmenter = ttsService.createTextSegmenter();
-        TtsStreamSession ttsStreamSession = null;
+        TtsRealtimeSession ttsRealtimeSession = null;
+        TtsUtterance ttsUtterance = null;
         AtomicBoolean sawFirstTextDelta = new AtomicBoolean();
         AtomicBoolean sawFirstAudioChunk = new AtomicBoolean();
         AtomicReference<Throwable> fatalFailure = new AtomicReference<>();
@@ -108,7 +108,9 @@ public class AssistantStreamingOrchestrator {
             }
             if (ttsService.isConfigured()) {
                 publishTiming(context, "tts.open.start", System.currentTimeMillis(), turnStartedAtNs);
-                ttsStreamSession = ttsService.openSession(session.getArticle().language(), new TtsAudioListener() {
+                TtsSessionRef ttsSessionRef = assistantTtsSessionManager.getOrCreate(sessionId, session.getArticle().language());
+                ttsRealtimeSession = ttsSessionRef.session();
+                ttsUtterance = ttsRealtimeSession.openUtterance(new TtsAudioListener() {
                     @Override
                     public void onSessionReady() {
                         if (handle.isCancelled()) {
@@ -147,11 +149,11 @@ public class AssistantStreamingOrchestrator {
                         eventPublisher.publishError(context, failureCode(normalizedFailure, SysCode.TTS_STREAM_FAILED), failureMessage(normalizedFailure));
                     }
                 });
-                handle.attachTtsStreamSession(ttsStreamSession);
+                handle.attachTtsRealtimeSession(ttsRealtimeSession);
                 publishTiming(context, "tts.open.returned", System.currentTimeMillis(), turnStartedAtNs);
             }
 
-            TtsStreamSession finalTtsStreamSession = ttsStreamSession;
+            TtsUtterance finalTtsUtterance = ttsUtterance;
             publishTiming(context, "llm.request.start", System.currentTimeMillis(), turnStartedAtNs);
             llmClient.streamChatCompletion(messages, new LlmDeltaListener() {
                 @Override
@@ -167,13 +169,13 @@ public class AssistantStreamingOrchestrator {
                     fullText.append(delta);
                     eventPublisher.publishTextDelta(context, delta);
                     List<TextSegment> segments = toTtsSegments(textSegmenter.append(delta), session.getArticle().language());
-                    if (finalTtsStreamSession != null) {
+                    if (finalTtsUtterance != null) {
                         for (TextSegment segment : segments) {
                             throwIfFatalFailure(fatalFailure);
                             if (handle.isCancelled()) {
                                 throw new CancellationException("Session closed");
                             }
-                            finalTtsStreamSession.enqueue(segment);
+                            finalTtsUtterance.enqueue(segment);
                         }
                     }
                 }
@@ -186,9 +188,9 @@ public class AssistantStreamingOrchestrator {
                     }
                     publishTiming(context, "llm.stream.completed", System.currentTimeMillis(), turnStartedAtNs);
                     TextSegment remaining = textSegmenter.flushRemaining();
-                    if (finalTtsStreamSession != null && remaining != null) {
+                    if (finalTtsUtterance != null && remaining != null) {
                         throwIfFatalFailure(fatalFailure);
-                        finalTtsStreamSession.enqueue(toTtsSegment(remaining, session.getArticle().language()));
+                        finalTtsUtterance.enqueue(toTtsSegment(remaining, session.getArticle().language()));
                     }
                 }
 
@@ -204,17 +206,17 @@ public class AssistantStreamingOrchestrator {
             }
             eventPublisher.publishTextDone(context, fullText.toString());
 
-            if (ttsStreamSession != null) {
+            if (ttsUtterance != null) {
                 throwIfFatalFailure(fatalFailure);
                 if (handle.isCancelled()) {
                     return;
                 }
-                ttsStreamSession.finish();
+                ttsUtterance.finish();
                 throwIfFatalFailure(fatalFailure);
                 if (handle.isCancelled()) {
                     return;
                 }
-                ttsStreamSession.awaitFinished(Duration.ofSeconds(60));
+                ttsUtterance.awaitFinished(Duration.ofSeconds(60));
                 throwIfFatalFailure(fatalFailure);
             } else {
                 if (handle.isCancelled()) {
@@ -237,6 +239,7 @@ public class AssistantStreamingOrchestrator {
                 session.markFailed();
                 eventPublisher.publishError(context, failureCode(failure, SysCode.ASSISTANT_STREAM_FAILED), failureMessage(failure));
             }
+            assistantTtsSessionManager.close(sessionId);
         } catch (Exception exception) {
             Thread.interrupted();
             Throwable failure = fatalFailure.get();
@@ -245,19 +248,9 @@ public class AssistantStreamingOrchestrator {
                 session.markFailed();
                 eventPublisher.publishError(context, failureCode(effectiveFailure, SysCode.ASSISTANT_STREAM_FAILED), failureMessage(effectiveFailure));
             }
+            assistantTtsSessionManager.close(sessionId);
         } finally {
-            closeQuietly(ttsStreamSession);
             activeTurnRegistry.complete(sessionId, handle);
-        }
-    }
-
-    private void closeQuietly(AutoCloseable closeable) {
-        if (closeable == null) {
-            return;
-        }
-        try {
-            closeable.close();
-        } catch (Exception ignored) {
         }
     }
 
@@ -295,16 +288,7 @@ public class AssistantStreamingOrchestrator {
     }
 
     static TextSegment toTtsSegment(TextSegment segment, String language) {
-        if (segment == null) {
-            return null;
-        }
-        if (language == null || !language.startsWith("zh")) {
-            return segment;
-        }
-        long start = System.nanoTime();
-        String afterConvert = ZhConverterUtil.toSimple(segment.text());
-        log.info("raw text: \"{}\", after convert text: \"{}\", time: {}ns",segment.text(),afterConvert,(System.nanoTime() - start));
-        return new TextSegment(segment.segmentSeq(), afterConvert);
+        return TtsTextNormalizer.normalize(segment, language);
     }
 
     private Throwable normalizeFailure(Throwable throwable) {

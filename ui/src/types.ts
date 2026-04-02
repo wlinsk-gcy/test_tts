@@ -38,6 +38,24 @@ export type SubmitTurnResponse = {
   currentTurnNo: number;
 };
 
+export type TtsSentenceStreamRequest = {
+  sessionId: string | null;
+  language: string;
+  sentence: string;
+};
+
+export type TtsCloseSessionRequest = {
+  sessionId: string;
+};
+
+export type TtsChunkEventType = "audio.chunk" | "audio.done" | "audio.error";
+
+export type TtsChunkEvent = {
+  type: TtsChunkEventType;
+  sessionId: string | null;
+  data: Record<string, unknown>;
+};
+
 export type SessionSnapshotResponse = {
   sessionId: string;
   title: string;

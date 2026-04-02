@@ -11,23 +11,25 @@ public class AiTtsProperties {
     private String wsUrl;
     private String model;
     private String zhVoice = "Ethan";
-    private String enVoice = "Ryan";
+    private String enVoice = "Aiden";
     private int sampleRate = 24000;
     private String mode = "server_commit";
     private String responseFormat = "pcm";
     private int segmentQueueCapacity = 32;
+    private boolean debugLogUpstreamEvents;
     private Commit commit = new Commit();
+    private Session session = new Session();
 
     public void setCommit(Commit commit) {
         this.commit = commit == null ? new Commit() : commit;
     }
 
-    public String normalizedMode() {
-        return "commit".equalsIgnoreCase(mode) ? "commit" : "server_commit";
+    public void setSession(Session session) {
+        this.session = session == null ? new Session() : session;
     }
 
-    public boolean usesClientCommit() {
-        return "commit".equals(normalizedMode());
+    public String normalizedMode() {
+        return "server_commit";
     }
 
     @Data
@@ -39,5 +41,12 @@ public class AiTtsProperties {
         private String softPunctuation = ",\uFF0C";
         private String hardPunctuation = ".!?\u3002\uFF01\uFF1F";
 
+    }
+
+    @Data
+    public static class Session {
+
+        private int maxActiveSessions = 128;
+        private long idleTimeoutMs = 300_000L;
     }
 }
