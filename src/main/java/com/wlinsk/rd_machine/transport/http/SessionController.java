@@ -1,9 +1,9 @@
 package com.wlinsk.rd_machine.transport.http;
 
-import com.wlinsk.rd_machine.model.Result;
-import com.wlinsk.rd_machine.session.ReadingSession;
-import com.wlinsk.rd_machine.session.SessionService;
-import com.wlinsk.rd_machine.transport.http.dto.*;
+import com.wlinsk.rd_machine.basic.model.Result;
+import com.wlinsk.rd_machine.basic.model.dto.*;
+import com.wlinsk.rd_machine.basic.model.bo.ReadingSession;
+import com.wlinsk.rd_machine.core.session.SessionService;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 

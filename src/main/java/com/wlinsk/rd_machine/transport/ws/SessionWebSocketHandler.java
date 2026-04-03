@@ -1,6 +1,6 @@
 package com.wlinsk.rd_machine.transport.ws;
 
-import com.wlinsk.rd_machine.logging.WebSocketAccessLogHelper;
+import com.wlinsk.rd_machine.basic.logging.WebSocketAccessLogHelper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;

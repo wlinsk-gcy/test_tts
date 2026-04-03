@@ -1,0 +1,84 @@
+package com.wlinsk.rd_machine.core.llm;
+
+import com.openai.client.OpenAIClient;
+import com.openai.client.okhttp.OpenAIOkHttpClient;
+import com.openai.core.http.StreamResponse;
+import com.openai.models.chat.completions.*;
+import com.wlinsk.rd_machine.basic.config.AiLlmProperties;
+import com.wlinsk.rd_machine.basic.model.bo.LlmMessage;
+import org.springframework.stereotype.Component;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.function.BooleanSupplier;
+
+@Component
+public class LlmClient {
+
+    private final LlmService llmService;
+    private final OpenAIClient openAIClient;
+
+    public LlmClient(AiLlmProperties properties, LlmService llmService) {
+        this.llmService = llmService;
+        this.openAIClient = OpenAIOkHttpClient.builder()
+                .apiKey(properties.getApiKey())
+                .baseUrl(properties.getBaseUrl())
+                .timeout(Duration.ofMinutes(2))
+                .build();
+    }
+
+    public void streamChatCompletion(List<LlmMessage> messages, LlmDeltaListener listener, BooleanSupplier cancelled) {
+        ChatCompletionCreateParams params = buildParams(messages);
+        try (StreamResponse<ChatCompletionChunk> response = openAIClient.chat().completions().createStreaming(params)) {
+            response.stream()
+                    .flatMap(chunk -> chunk.choices().stream())
+                    .flatMap(choice -> choice.delta().content().stream())
+                    .filter(delta -> !delta.isBlank())
+                    .forEach(delta -> {
+                        if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) {
+                            throw new CancellationException("Session closed");
+                        }
+                        listener.onDelta(delta);
+                    });
+            if (!cancelled.getAsBoolean() && !Thread.currentThread().isInterrupted()) {
+                listener.onComplete();
+            }
+        } catch (CancellationException ignored) {
+            Thread.interrupted();
+        } catch (Exception exception) {
+            if (!cancelled.getAsBoolean()) {
+                listener.onError(exception);
+                throw exception;
+            }
+        }
+    }
+
+    ChatCompletionCreateParams buildParams(List<LlmMessage> messages) {
+        ChatCompletionCreateParams.Builder builder = ChatCompletionCreateParams.builder()
+                .model(llmService.getModel());
+        messages.forEach(message -> builder.addMessage(toMessageParam(message)));
+        return builder.build();
+    }
+
+    private ChatCompletionMessageParam toMessageParam(LlmMessage message) {
+        return switch (message.role()) {
+            case "system" -> ChatCompletionMessageParam.ofSystem(
+                    ChatCompletionSystemMessageParam.builder()
+                            .content(ChatCompletionSystemMessageParam.Content.ofText(message.content()))
+                            .build()
+            );
+            case "user" -> ChatCompletionMessageParam.ofUser(
+                    ChatCompletionUserMessageParam.builder()
+                            .content(ChatCompletionUserMessageParam.Content.ofText(message.content()))
+                            .build()
+            );
+            case "assistant" -> ChatCompletionMessageParam.ofAssistant(
+                    ChatCompletionAssistantMessageParam.builder()
+                            .content(ChatCompletionAssistantMessageParam.Content.ofText(message.content()))
+                            .build()
+            );
+            default -> throw new IllegalArgumentException("Unsupported role: " + message.role());
+        };
+    }
+}

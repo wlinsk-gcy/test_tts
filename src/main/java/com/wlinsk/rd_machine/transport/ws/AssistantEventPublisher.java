@@ -2,8 +2,8 @@ package com.wlinsk.rd_machine.transport.ws;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.wlinsk.rd_machine.logging.WebSocketAccessLogHelper;
-import com.wlinsk.rd_machine.streaming.StreamingSessionContext;
+import com.wlinsk.rd_machine.basic.logging.WebSocketAccessLogHelper;
+import com.wlinsk.rd_machine.basic.model.bo.StreamingSessionContext;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
