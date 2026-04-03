@@ -1,6 +1,7 @@
 package com.wlinsk.rd_machine.basic.logging;
 
 import com.wlinsk.rd_machine.transport.ws.AssistantEvent;
+import com.wlinsk.rd_machine.transport.ws.SessionConnectionRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -77,8 +78,9 @@ public class WebSocketAccessLogHelper {
             return null;
         }
         try {
-            return com.wlinsk.rd_machine.transport.ws.SessionConnectionRegistry.extractSessionId(session.getUri());
-        } catch (Exception ignored) {
+            return SessionConnectionRegistry.extractSessionId(session.getUri());
+        } catch (Exception e) {
+            log.warn("resolveSessionId error: ", e);
             return null;
         }
     }

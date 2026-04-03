@@ -262,6 +262,7 @@ public class AliyunRealtimeTtsClient {
 
         private void sendJson(Map<String, Object> payload) {
             try {
+                logOutboundEvent(payload);
                 webSocket.sendText(objectMapper.writeValueAsString(payload), true).join();
             } catch (Exception exception) {
                 failSession(exception);
@@ -320,6 +321,30 @@ public class AliyunRealtimeTtsClient {
 
         private void failSession(Throwable throwable) {
             closeSession(throwable);
+        }
+
+        private void logOutboundEvent(Map<String, Object> payload) {
+            if (!properties.isDebugLogUpstreamEvents() || payload == null) {
+                return;
+            }
+            String type = payload.get("type") instanceof String text ? text : null;
+            if (type == null) {
+                return;
+            }
+            Map<String, Object> data = switch (type) {
+                case "input_text_buffer.append" -> Map.of(
+                        "textLength",
+                        payload.get("text") instanceof String text ? text.length() : 0
+                );
+                default -> Map.of();
+            };
+            ReadingTtsLogHelper.logUpstreamOutboundEvent(
+                    upstreamSessionId,
+                    request.voice(),
+                    request.languageType(),
+                    type,
+                    data
+            );
         }
 
         private URI resolveUri() {

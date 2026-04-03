@@ -8,11 +8,13 @@ import com.wlinsk.rd_machine.basic.model.dto.SessionSnapshotResponse;
 import com.wlinsk.rd_machine.basic.model.dto.SubmitTurnRequest;
 import com.wlinsk.rd_machine.core.tts.AssistantTtsSessionManager;
 import com.wlinsk.rd_machine.utils.snowflake.IdUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+@Slf4j
 @Service
 public class SessionService {
 
@@ -52,6 +54,7 @@ public class SessionService {
         try {
             accepted = session.acceptStudentAnswer(clientSeq, request.text());
         } catch (IllegalStateException exception) {
+            log.error("acceptStudentAnswer error: ", exception);
             throw new ResponseStatusException(HttpStatus.CONFLICT, exception.getMessage(), exception);
         }
         if (accepted) {

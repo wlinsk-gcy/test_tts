@@ -6,7 +6,8 @@
 - DashScope realtime TTS 统一使用 `rd.ai.tts.mode=server_commit`。
 - 每个教师对话 Turn 或每次 HTTP 句子请求结束时，后端仍会发送一次 `input_text_buffer.commit`，用于 flush 当前缓冲文本，但不会关闭上游 TTS Session。
 - 文章朗读链路会输出 `stream.start`、`text.chunked`、`tts.session.ready`、`tts.first.audio`、`stream.completed`、`stream.timeout`、`stream.error` 等结构化日志。
-- 如需排查上游 realtime 事件，可开启 `rd.ai.tts.debug-log-upstream-events=true`，此时会记录 `session.updated`、`response.created`、`response.audio.done`、`response.done` 等 `tts.upstream` 日志。
+- `stream.error` 仍然保留结构化字段；同时错误路径会额外输出类内 `error` 日志并附带完整异常堆栈，便于直接查看抛错代码位置。
+- 如需排查上游 realtime 事件，可开启 `rd.ai.tts.debug-log-upstream-events=true`，此时会记录 `session.updated`、`response.created`、`response.audio.done`、`response.done`，以及出站的 `session.update`、`input_text_buffer.append`、`input_text_buffer.commit`、`session.finish` 等 `tts.upstream` 日志。
 
 # rd_machine 接口文档
 

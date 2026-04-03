@@ -10,6 +10,7 @@ import com.wlinsk.rd_machine.basic.model.dto.TtsChunkEvent;
 import com.wlinsk.rd_machine.basic.model.dto.TtsSentenceStreamRequest;
 import com.wlinsk.rd_machine.core.streaming.TextSegmenter;
 import com.wlinsk.rd_machine.utils.snowflake.IdUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
@@ -25,6 +26,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+@Slf4j
 @Service
 public class ReadingTtsStreamService {
 
@@ -106,6 +108,8 @@ public class ReadingTtsStreamService {
                         elapsedMs(startedAtNs),
                         Map.of("error", messageOf(error))
                 );
+                log.error("reading tts emitter error, requestId={}, sessionId={}, language={}",
+                        requestId, activeSessionId.get(), language, error);
             }
             cancelTask(streamTaskRef.get());
             closeActiveSession(activeSessionId.get());
@@ -184,6 +188,8 @@ public class ReadingTtsStreamService {
                     elapsedMs(startedAtNs),
                     Map.of("error", exception.getMessage(), "code", exception.getStatus())
             );
+            log.error("reading tts stream setup failed, requestId={}, sessionId={}, language={}, code={}",
+                    requestId, request.sessionId(), request.language(), exception.getStatus(), exception);
             emitAndComplete(sink, streamCompleted, TtsChunkEvent.audioError(request.sessionId(), exception.getStatus(), exception.getMessage()));
             return;
         }
@@ -276,6 +282,8 @@ public class ReadingTtsStreamService {
                                         "code", SysCode.TTS_STREAM_FAILED.getCode()
                                 )
                         );
+                        log.error("reading tts listener error, requestId={}, sessionId={}, language={}, code={}",
+                                requestId, sessionRef.sessionId(), request.language(), SysCode.TTS_STREAM_FAILED.getCode(), throwable);
                     }
                     emitAndComplete(
                             sink,
@@ -312,6 +320,8 @@ public class ReadingTtsStreamService {
                         elapsedMs(startedAtNs),
                         Map.of("error", exception.getMessage(), "code", exception.getStatus())
                 );
+                log.error("reading tts stream failed with business exception, requestId={}, sessionId={}, language={}, code={}",
+                        requestId, sessionRef.sessionId(), request.language(), exception.getStatus(), exception);
             }
             emitAndComplete(sink, streamCompleted, TtsChunkEvent.audioError(sessionRef.sessionId(), exception.getStatus(), exception.getMessage()));
         } catch (Exception exception) {
@@ -324,6 +334,8 @@ public class ReadingTtsStreamService {
                         elapsedMs(startedAtNs),
                         Map.of("error", messageOf(exception), "code", SysCode.TTS_STREAM_FAILED.getCode())
                 );
+                log.error("reading tts stream failed, requestId={}, sessionId={}, language={}, code={}",
+                        requestId, sessionRef.sessionId(), request.language(), SysCode.TTS_STREAM_FAILED.getCode(), exception);
             }
             emitAndComplete(
                     sink,

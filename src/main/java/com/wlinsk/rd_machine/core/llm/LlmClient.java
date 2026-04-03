@@ -6,13 +6,14 @@ import com.openai.core.http.StreamResponse;
 import com.openai.models.chat.completions.*;
 import com.wlinsk.rd_machine.basic.config.AiLlmProperties;
 import com.wlinsk.rd_machine.basic.model.bo.LlmMessage;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.function.BooleanSupplier;
-
+@Slf4j
 @Component
 public class LlmClient {
 
@@ -44,9 +45,11 @@ public class LlmClient {
             if (!cancelled.getAsBoolean() && !Thread.currentThread().isInterrupted()) {
                 listener.onComplete();
             }
-        } catch (CancellationException ignored) {
+        } catch (CancellationException e) {
+            log.warn("Session closed: ", e);
             Thread.interrupted();
         } catch (Exception exception) {
+            log.warn("streamChatCompletion error: ",exception);
             if (!cancelled.getAsBoolean()) {
                 listener.onError(exception);
                 throw exception;

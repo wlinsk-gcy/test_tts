@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.ContentCachingRequestWrapper;
 import org.springframework.web.util.ContentCachingResponseWrapper;
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+@Slf4j
 public final class LogPayloadSanitizer {
 
     private static final int MAX_TEXT_LENGTH = 256;
@@ -37,7 +39,8 @@ public final class LogPayloadSanitizer {
         }
         try {
             return sanitizeValue(JSON.parse(payload));
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.warn("sanitizePayload error: ", e);
             return truncateText(payload);
         }
     }

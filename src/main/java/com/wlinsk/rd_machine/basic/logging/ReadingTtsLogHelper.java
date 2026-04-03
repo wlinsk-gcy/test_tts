@@ -1,10 +1,12 @@
 package com.wlinsk.rd_machine.basic.logging;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+@Slf4j
 public final class ReadingTtsLogHelper {
 
     private ReadingTtsLogHelper() {
@@ -30,8 +32,7 @@ public final class ReadingTtsLogHelper {
         if (data != null && !data.isEmpty()) {
             logEntry.put("data", LogPayloadSanitizer.sanitizeValue(data));
         }
-        org.slf4j.LoggerFactory.getLogger(ReadingTtsLogHelper.class)
-                .info("{}", LogPayloadSanitizer.toJson(logEntry));
+        log.info("{}",LogPayloadSanitizer.toJson(logEntry));
     }
 
     public static void logUpstreamEvent(
@@ -41,17 +42,38 @@ public final class ReadingTtsLogHelper {
             String phase,
             Map<String, Object> data
     ) {
+        logUpstreamEvent(upstreamSessionId, voice, languageType, phase, data, "inbound");
+    }
+
+    public static void logUpstreamOutboundEvent(
+            String upstreamSessionId,
+            String voice,
+            String languageType,
+            String phase,
+            Map<String, Object> data
+    ) {
+        logUpstreamEvent(upstreamSessionId, voice, languageType, phase, data, "outbound");
+    }
+
+    private static void logUpstreamEvent(
+            String upstreamSessionId,
+            String voice,
+            String languageType,
+            String phase,
+            Map<String, Object> data,
+            String direction
+    ) {
         Map<String, Object> logEntry = new LinkedHashMap<>();
         logEntry.put("event", "tts.upstream");
         putIfHasText(logEntry, "upstreamSessionId", upstreamSessionId);
         putIfHasText(logEntry, "voice", voice);
         putIfHasText(logEntry, "languageType", languageType);
         putIfHasText(logEntry, "phase", phase);
+        putIfHasText(logEntry, "direction", direction);
         if (data != null && !data.isEmpty()) {
             logEntry.put("data", LogPayloadSanitizer.sanitizeValue(data));
         }
-        org.slf4j.LoggerFactory.getLogger(ReadingTtsLogHelper.class)
-                .info("{}", LogPayloadSanitizer.toJson(logEntry));
+        log.info("{}", LogPayloadSanitizer.toJson(logEntry));
     }
 
     private static void putIfHasText(Map<String, Object> target, String key, String value) {
