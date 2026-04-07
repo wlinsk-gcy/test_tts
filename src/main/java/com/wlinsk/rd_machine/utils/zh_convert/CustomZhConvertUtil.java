@@ -21,13 +21,14 @@ public class CustomZhConvertUtil {
 
         @Override
         protected Map<String, List<String>> tsPhraseExtra() {
-//            return DataUtil.buildDataMap("/opencc/ts-phrases.txt"); // 词表暂时用不到，默认即可
-            return Map.of();
+            return DataUtil.buildDataMap("/opencc/ts-phrases.txt");
+//            return Map.of();
         }
 
         @Override
         protected Map<String, List<String>> tsCharExtra() {
-            return DataUtil.buildDataMap("/opencc/ts-chars.txt");
+//            return DataUtil.buildDataMap("/opencc/ts-chars.txt");
+            return Map.of();
         }
 
         @Override
