@@ -37,10 +37,13 @@ public final class LogPayloadSanitizer {
         if (!StringUtils.hasText(payload)) {
             return payload;
         }
+        String trimmedPayload = payload.trim();
+        if (!looksLikeJson(trimmedPayload)) {
+            return truncateText(payload);
+        }
         try {
-            return sanitizeValue(JSON.parse(payload));
+            return sanitizeValue(JSON.parse(trimmedPayload));
         } catch (Exception e) {
-            log.warn("sanitizePayload error: ", e);
             return truncateText(payload);
         }
     }
@@ -173,5 +176,16 @@ public final class LogPayloadSanitizer {
             return value;
         }
         return value.substring(0, MAX_TEXT_LENGTH) + "[truncated, originalLength=" + value.length() + "]";
+    }
+
+    private static boolean looksLikeJson(String payload) {
+        char first = payload.charAt(0);
+        if (first == '{' || first == '[' || first == '"') {
+            return true;
+        }
+        if (first == '-' || Character.isDigit(first)) {
+            return true;
+        }
+        return "true".equals(payload) || "false".equals(payload) || "null".equals(payload);
     }
 }
