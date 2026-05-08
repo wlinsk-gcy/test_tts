@@ -15,6 +15,7 @@ import org.springframework.web.util.ContentCachingResponseWrapper;
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 @Slf4j
 @Component
@@ -22,7 +23,10 @@ import java.util.Map;
 public class HttpAccessLogFilter extends OncePerRequestFilter {
 
     private static final int REQUEST_CACHE_LIMIT = 1024 * 1024;
-    private static final String STREAMING_TTS_ENDPOINT = "/api/tts/sessions/stream";
+    private static final Set<String> STREAMING_ENDPOINTS = Set.of(
+            "/api/tts/sessions/stream",
+            "/api/cosyvoice/tts/stream"
+    );
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -108,6 +112,6 @@ public class HttpAccessLogFilter extends OncePerRequestFilter {
     }
 
     private boolean isStreamingRequest(HttpServletRequest request) {
-        return STREAMING_TTS_ENDPOINT.equals(request.getRequestURI());
+        return STREAMING_ENDPOINTS.contains(request.getRequestURI());
     }
 }

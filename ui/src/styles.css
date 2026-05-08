@@ -28,6 +28,7 @@ body {
 }
 
 button,
+select,
 textarea {
   font: inherit;
 }
@@ -142,6 +143,13 @@ small {
 
 .primary-button {
   background: linear-gradient(120deg, rgba(16, 185, 129, 0.4), rgba(34, 197, 94, 0.28));
+}
+
+.primary-button:disabled,
+.ghost-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  transform: none;
 }
 
 .facts-grid {

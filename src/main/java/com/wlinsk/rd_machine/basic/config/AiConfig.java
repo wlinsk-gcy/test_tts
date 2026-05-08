@@ -9,7 +9,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties({AiLlmProperties.class, AiTtsProperties.class})
+@EnableConfigurationProperties({AiLlmProperties.class, AiTtsProperties.class, CosyVoiceTtsProperties.class})
 public class AiConfig {
 
     @Bean

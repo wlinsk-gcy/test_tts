@@ -5,6 +5,7 @@ import type {
   SessionSnapshotResponse,
   TtsChunkEvent,
   TtsCloseSessionRequest,
+  TtsStreamEndpoint,
   TtsSentenceStreamRequest,
   SubmitTurnRequest,
   SubmitTurnResponse
@@ -46,6 +47,11 @@ export type TtsSentenceStreamHandle = {
   done: Promise<void>;
 };
 
+const TTS_STREAM_PATHS: Record<TtsStreamEndpoint, string> = {
+  cosyvoice: "/api/cosyvoice/tts/stream",
+  legacy: "/api/tts/sessions/stream"
+};
+
 export function createSession(payload: CreateSessionPayload): Promise<CreateSessionResponse> {
   return request<CreateSessionResponse>("/api/sessions", {
     method: "POST",
@@ -79,11 +85,12 @@ export function closeTtsSession(sessionId: string): Promise<void> {
 
 export function streamTtsSentence(
   payload: TtsSentenceStreamRequest,
-  onEvent: (event: TtsChunkEvent) => void | Promise<void>
+  onEvent: (event: TtsChunkEvent) => void | Promise<void>,
+  endpoint: TtsStreamEndpoint = "legacy"
 ): TtsSentenceStreamHandle {
   const abortController = new AbortController();
   const done = (async () => {
-    const response = await fetch(`${API_BASE}/api/tts/sessions/stream`, {
+    const response = await fetch(`${API_BASE}${TTS_STREAM_PATHS[endpoint]}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"

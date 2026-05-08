@@ -1,8 +1,9 @@
-import type { TimelineEntry } from "../types";
+import type { TimelineEntry, TtsStreamEndpoint } from "../types";
 
 type Props = {
   sentence: string;
   language: string;
+  endpoint: TtsStreamEndpoint;
   sessionId: string | null;
   streamState: string;
   lastError: string | null;
@@ -11,6 +12,7 @@ type Props = {
   timeline: TimelineEntry[];
   onSentenceChange: (value: string) => void;
   onLanguageChange: (value: string) => void;
+  onEndpointChange: (value: TtsStreamEndpoint) => void;
   onStart: () => void;
   onClose: () => void;
   onResetPlayer: () => void;
@@ -19,6 +21,7 @@ type Props = {
 export function TtsSentenceLab({
   sentence,
   language,
+  endpoint,
   sessionId,
   streamState,
   lastError,
@@ -27,10 +30,15 @@ export function TtsSentenceLab({
   timeline,
   onSentenceChange,
   onLanguageChange,
+  onEndpointChange,
   onStart,
   onClose,
   onResetPlayer
 }: Props) {
+  const streamPath = endpoint === "cosyvoice" ? "/api/cosyvoice/tts/stream" : "/api/tts/sessions/stream";
+  const canCloseSession = endpoint === "legacy" ? Boolean(sessionId) : streamState === "streaming";
+  const closeButtonText = endpoint === "legacy" ? "Close TTS Session" : "Cancel Stream";
+
   return (
     <section className="panel">
       <div className="panel-header">
@@ -40,14 +48,29 @@ export function TtsSentenceLab({
 
       <div className="tts-lab-meta">
         <div>
-          <label>Reading TTS Session</label>
+          <label>TTS Session</label>
           <strong>{sessionId ?? "--"}</strong>
+        </div>
+        <div>
+          <label>Endpoint</label>
+          <strong>{streamPath}</strong>
         </div>
         <div>
           <label>Queued Audio</label>
           <strong>{queuedChunks} chunks / {queuedBytes} bytes</strong>
         </div>
       </div>
+
+      <label htmlFor="tts-endpoint">TTS Endpoint</label>
+      <select
+        id="tts-endpoint"
+        className="tts-lab-select"
+        value={endpoint}
+        onChange={(event) => onEndpointChange(event.target.value as TtsStreamEndpoint)}
+      >
+        <option value="cosyvoice">CosyVoice v3 Flash</option>
+        <option value="legacy">Legacy Realtime</option>
+      </select>
 
       <label htmlFor="tts-language">Language</label>
       <select
@@ -66,15 +89,15 @@ export function TtsSentenceLab({
         className="student-input"
         value={sentence}
         onChange={(event) => onSentenceChange(event.target.value)}
-        placeholder="Type one sentence to stream through /api/tts/sessions/stream"
+        placeholder={`Type one sentence to stream through ${streamPath}`}
       />
 
       <div className="tts-lab-actions">
         <button className="primary-button" type="button" disabled={!sentence.trim()} onClick={onStart}>
           Start TTS
         </button>
-        <button className="ghost-button" type="button" disabled={!sessionId} onClick={onClose}>
-          Close TTS Session
+        <button className="ghost-button" type="button" disabled={!canCloseSession} onClick={onClose}>
+          {closeButtonText}
         </button>
         <button className="ghost-button" type="button" onClick={onResetPlayer}>
           Reset Player

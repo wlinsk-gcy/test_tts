@@ -48,7 +48,9 @@ export type TtsCloseSessionRequest = {
   sessionId: string;
 };
 
-export type TtsChunkEventType = "audio.chunk" | "audio.done" | "audio.error";
+export type TtsStreamEndpoint = "cosyvoice" | "legacy";
+
+export type TtsChunkEventType = "cosyvoice.event" | "audio.chunk" | "audio.done" | "audio.error";
 
 export type TtsChunkEvent = {
   type: TtsChunkEventType;

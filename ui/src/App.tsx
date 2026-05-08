@@ -17,7 +17,7 @@ import { EventTimeline } from "./components/EventTimeline";
 import { SessionPanel } from "./components/SessionPanel";
 import { StudentInputPanel } from "./components/StudentInputPanel";
 import { TtsSentenceLab } from "./components/TtsSentenceLab";
-import type { AssistantEvent, DebugArticle, MetricsState, TimelineEntry, TtsChunkEvent } from "./types";
+import type { AssistantEvent, DebugArticle, MetricsState, TimelineEntry, TtsChunkEvent, TtsStreamEndpoint } from "./types";
 import { openSessionSocket } from "./ws";
 
 const MAX_TIMELINE = 120;
@@ -40,6 +40,7 @@ export default function App() {
   const [metrics, setMetrics] = useState<MetricsState>({});
   const [playerVersion, setPlayerVersion] = useState(0);
   const [ttsSentence, setTtsSentence] = useState("");
+  const [ttsSentenceEndpoint, setTtsSentenceEndpoint] = useState<TtsStreamEndpoint>("cosyvoice");
   const [ttsSentenceLanguage, setTtsSentenceLanguage] = useState("zh-CN");
   const [ttsSentenceSessionId, setTtsSentenceSessionId] = useState<string | null>(null);
   const [ttsSentenceStreamState, setTtsSentenceStreamState] = useState("idle");
@@ -265,7 +266,7 @@ export default function App() {
     pushTimeline(setTtsSentenceTimeline, {
       at: Date.now(),
       label: "tts.stream.start",
-      detail: `${ttsSentenceLanguage} ${sentence.slice(0, 80)}`
+      detail: `${ttsSentenceEndpoint} ${ttsSentenceLanguage} ${sentence.slice(0, 80)}`
     });
 
     try {
@@ -281,7 +282,8 @@ export default function App() {
             return;
           }
           await handleTtsSentenceEvent(event);
-        }
+        },
+        ttsSentenceEndpoint
       );
       ttsSentenceStreamHandleRef.current = streamHandle;
       await streamHandle.done;
@@ -311,11 +313,24 @@ export default function App() {
   }
 
   async function handleCloseSentenceTtsSession() {
-    if (!ttsSentenceSessionId) {
+    const sessionIdToClose = ttsSentenceSessionId;
+
+    if (ttsSentenceEndpoint !== "legacy") {
+      startNewTtsSentenceStream();
+      setTtsSentenceSessionId(null);
+      setTtsSentenceStreamState("idle");
+      pushTimeline(setTtsSentenceTimeline, {
+        at: Date.now(),
+        label: "tts.stream.cancel",
+        detail: sessionIdToClose ?? "/api/cosyvoice/tts/stream"
+      });
       return;
     }
 
-    const sessionIdToClose = ttsSentenceSessionId;
+    if (!sessionIdToClose) {
+      return;
+    }
+
     startNewTtsSentenceStream();
     setTtsSentenceStreamState("closing");
 
@@ -350,6 +365,25 @@ export default function App() {
     });
   }
 
+  function handleTtsSentenceEndpointChange(endpoint: TtsStreamEndpoint) {
+    if (endpoint === ttsSentenceEndpoint) {
+      return;
+    }
+
+    startNewTtsSentenceStream();
+    ttsSentencePlayerRef.current.reset();
+    setTtsSentenceEndpoint(endpoint);
+    setTtsSentenceSessionId(null);
+    setTtsSentenceStreamState("idle");
+    setTtsSentenceError(null);
+    setTtsSentencePlayerVersion((value) => value + 1);
+    pushTimeline(setTtsSentenceTimeline, {
+      at: Date.now(),
+      label: "tts.endpoint.change",
+      detail: endpoint === "cosyvoice" ? "/api/cosyvoice/tts/stream" : "/api/tts/sessions/stream"
+    });
+  }
+
   async function handleTtsSentenceEvent(event: TtsChunkEvent) {
     const now = Date.now();
     if (event.sessionId) {
@@ -357,15 +391,25 @@ export default function App() {
     }
 
     switch (event.type) {
+      case "cosyvoice.event": {
+        const eventType = String(event.data.eventType ?? "unknown");
+        pushTimeline(setTtsSentenceTimeline, {
+          at: now,
+          label: `cosyvoice.${eventType}`,
+          detail: formatCosyVoiceEventDetail(event)
+        });
+        break;
+      }
       case "audio.chunk": {
         const chunkBase64 = String(event.data.chunkBase64 ?? "");
-        const sampleRate = Number(event.data.sampleRate ?? 24000);
+        const sampleRate = Number(event.data.sampleRate ?? defaultTtsSampleRate(ttsSentenceEndpoint));
+        const chunkSeq = event.data.chunkSeq ?? event.data.segmentSeq ?? "?";
         await ttsSentencePlayerRef.current.enqueueBase64Pcm(chunkBase64, sampleRate);
         setTtsSentencePlayerVersion((value) => value + 1);
         pushTimeline(setTtsSentenceTimeline, {
           at: now,
           label: "audio.chunk",
-          detail: `segment=${String(event.data.segmentSeq ?? "?")}, bytes=${Math.round((chunkBase64.length * 3) / 4)}`
+          detail: `chunk=${String(chunkSeq)}, rate=${sampleRate}, bytes=${Math.round((chunkBase64.length * 3) / 4)}${formatOptionalTaskId(event)}`
         });
         break;
       }
@@ -374,7 +418,7 @@ export default function App() {
         pushTimeline(setTtsSentenceTimeline, {
           at: now,
           label: "audio.done",
-          detail: event.sessionId ?? undefined
+          detail: formatTtsCompletionDetail(event)
         });
         break;
       }
@@ -385,7 +429,7 @@ export default function App() {
         pushTimeline(setTtsSentenceTimeline, {
           at: now,
           label: "audio.error",
-          detail: message
+          detail: `${message}${formatOptionalTaskId(event)}`
         });
         break;
       }
@@ -410,6 +454,32 @@ export default function App() {
       "name" in error &&
       (error as { name?: string }).name === "AbortError"
     );
+  }
+
+  function defaultTtsSampleRate(endpoint: TtsStreamEndpoint): number {
+    return endpoint === "cosyvoice" ? 22050 : 24000;
+  }
+
+  function formatOptionalTaskId(event: TtsChunkEvent): string {
+    const taskId = event.data.taskId;
+    return typeof taskId === "string" && taskId ? `, task=${taskId}` : "";
+  }
+
+  function formatTtsCompletionDetail(event: TtsChunkEvent): string | undefined {
+    const details = [
+      event.sessionId ? `session=${event.sessionId}` : null,
+      typeof event.data.taskId === "string" && event.data.taskId ? `task=${event.data.taskId}` : null
+    ].filter(Boolean);
+    return details.length > 0 ? details.join(", ") : undefined;
+  }
+
+  function formatCosyVoiceEventDetail(event: TtsChunkEvent): string {
+    const details = [
+      typeof event.data.taskId === "string" && event.data.taskId ? `task=${event.data.taskId}` : null,
+      typeof event.data.requestId === "string" && event.data.requestId ? `request=${event.data.requestId}` : null,
+      event.data.usage ? `usage=${JSON.stringify(event.data.usage).slice(0, 160)}` : null
+    ].filter(Boolean);
+    return details.join(", ");
   }
 
   const playerStats = playerRef.current.getStats();
@@ -456,6 +526,7 @@ export default function App() {
         />
         <TtsSentenceLab
           sentence={ttsSentence}
+          endpoint={ttsSentenceEndpoint}
           language={ttsSentenceLanguage}
           sessionId={ttsSentenceSessionId}
           streamState={ttsSentenceStreamState}
@@ -465,6 +536,7 @@ export default function App() {
           timeline={ttsSentenceTimeline}
           onSentenceChange={setTtsSentence}
           onLanguageChange={setTtsSentenceLanguage}
+          onEndpointChange={handleTtsSentenceEndpointChange}
           onStart={() => { void handleStartSentenceTts(); }}
           onClose={() => { void handleCloseSentenceTtsSession(); }}
           onResetPlayer={handleResetSentenceTtsPlayer}
