@@ -192,6 +192,7 @@ public class CosyVoiceWebSocketClient implements WebSocket.Listener {
             Integer usageCharacters = root.path("payload").path("usage").has("characters")
                     ? root.path("payload").path("usage").path("characters").asInt()
                     : null;
+            String payloadOutput = payloadOutput(root);
             CosyVoiceUpstreamEvent event = new CosyVoiceUpstreamEvent(
                     taskId,
                     eventType,
@@ -204,13 +205,14 @@ public class CosyVoiceWebSocketClient implements WebSocket.Listener {
                 task.listener.onUpstreamEvent(event);
             }
             log.info(
-                    "cosyvoice.inbound.event sessionId={} taskId={} connectionId={} eventType={} requestId={} usageCharacters={} elapsedMs={}",
+                    "cosyvoice.inbound.event sessionId={} taskId={} connectionId={} eventType={} requestId={} usageCharacters={} payloadOutput={} elapsedMs={}",
                     task != null ? task.request.sessionId() : null,
                     taskId,
                     connectionId,
                     eventType,
                     requestId,
                     usageCharacters,
+                    payloadOutput,
                     task != null ? elapsedMs(task.request.startedAtNs()) : null
             );
             if ("task-started".equals(eventType)) {
@@ -342,11 +344,12 @@ public class CosyVoiceWebSocketClient implements WebSocket.Listener {
             textLength = task.request.sentence().length();
         }
         log.info(
-                "cosyvoice.outbound sessionId={} taskId={} connectionId={} eventType={} textLength={} elapsedMs={}",
+                "cosyvoice.outbound sessionId={} taskId={} connectionId={} eventType={} ssml={} textLength={} elapsedMs={}",
                 task != null ? task.request.sessionId() : null,
                 taskId,
                 connectionId,
                 action,
+                task != null ? task.request.ssml() : null,
                 textLength,
                 task != null ? elapsedMs(task.request.startedAtNs()) : null
         );
@@ -359,9 +362,9 @@ public class CosyVoiceWebSocketClient implements WebSocket.Listener {
         parameters.put("voice", request.voice());
         parameters.put("format", properties.getFormat());
         parameters.put("sample_rate", properties.getSampleRate());
-        parameters.put("enable_ssml", properties.isEnableSsml());
+        parameters.put("enable_ssml", request.ssml());
         //官方：但当前版本仅处理第一个元素，因此建议只传入一个值。
-        parameters.put("language_hints", List.of(request.language().startsWith("en")?"en":"zh"));
+        parameters.put("language_hints", List.of(CosyVoiceConnectionKey.isEnglish(request.language()) ? "en" : "zh"));
         // cosyvoice-v3-flash的 instruct需要根据不同音色调整。多个音色无法共用同一个instruct
         // parameters.put("instruction", "你说话的角色是温和客服，你说话的情感是neutral。");
 
@@ -419,6 +422,18 @@ public class CosyVoiceWebSocketClient implements WebSocket.Listener {
                 connectionId
         );
         return null;
+    }
+
+    private String payloadOutput(JsonNode root) {
+        JsonNode output = root.path("payload").path("output");
+        if (output.isMissingNode() || output.isNull()) {
+            return null;
+        }
+        String value = output.toString();
+        if (value.length() <= 2_000) {
+            return value;
+        }
+        return value.substring(0, 2_000) + "...[truncated]";
     }
 
     private String errorMessage(JsonNode root) {

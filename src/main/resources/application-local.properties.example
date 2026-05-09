@@ -27,7 +27,6 @@ rd.ai.cosyvoice.ws-url=wss://dashscope.aliyuncs.com/api-ws/v1/inference/
 rd.ai.cosyvoice.model=cosyvoice-v3-flash
 rd.ai.cosyvoice.sample-rate=22050
 rd.ai.cosyvoice.format=pcm
-rd.ai.cosyvoice.enable-ssml=false
 rd.ai.cosyvoice.zh-voice=zh_voice
 rd.ai.cosyvoice.en-voice=en_voice
 rd.ai.cosyvoice.connect-timeout-ms=30000

@@ -90,12 +90,20 @@ export function streamTtsSentence(
 ): TtsSentenceStreamHandle {
   const abortController = new AbortController();
   const done = (async () => {
+    const requestPayload = endpoint === "cosyvoice"
+      ? payload
+      : {
+          sessionId: payload.sessionId,
+          language: payload.language,
+          sentence: payload.sentence
+        };
+
     const response = await fetch(`${API_BASE}${TTS_STREAM_PATHS[endpoint]}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(requestPayload),
       signal: abortController.signal
     });
 

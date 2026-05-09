@@ -6,6 +6,7 @@ public record CosyVoiceTaskRequest(
         String language,
         String voice,
         String sentence,
+        boolean ssml,
         long startedAtNs
 ) {
 }

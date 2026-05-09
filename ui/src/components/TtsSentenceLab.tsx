@@ -3,6 +3,7 @@ import type { TimelineEntry, TtsStreamEndpoint } from "../types";
 type Props = {
   sentence: string;
   language: string;
+  ssml: boolean;
   endpoint: TtsStreamEndpoint;
   sessionId: string | null;
   streamState: string;
@@ -12,6 +13,7 @@ type Props = {
   timeline: TimelineEntry[];
   onSentenceChange: (value: string) => void;
   onLanguageChange: (value: string) => void;
+  onSsmlChange: (value: boolean) => void;
   onEndpointChange: (value: TtsStreamEndpoint) => void;
   onStart: () => void;
   onClose: () => void;
@@ -21,6 +23,7 @@ type Props = {
 export function TtsSentenceLab({
   sentence,
   language,
+  ssml,
   endpoint,
   sessionId,
   streamState,
@@ -30,6 +33,7 @@ export function TtsSentenceLab({
   timeline,
   onSentenceChange,
   onLanguageChange,
+  onSsmlChange,
   onEndpointChange,
   onStart,
   onClose,
@@ -84,6 +88,17 @@ export function TtsSentenceLab({
         <option value="zh-TW">zh-TW</option>
         <option value="en-US">en-US</option>
       </select>
+
+      <label className="tts-lab-checkbox" htmlFor="tts-ssml">
+        <input
+          id="tts-ssml"
+          type="checkbox"
+          checked={ssml}
+          disabled={endpoint !== "cosyvoice"}
+          onChange={(event) => onSsmlChange(event.target.checked)}
+        />
+        <span>SSML</span>
+      </label>
 
       <textarea
         className="student-input"

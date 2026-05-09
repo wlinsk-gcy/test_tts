@@ -42,6 +42,7 @@ export type TtsSentenceStreamRequest = {
   sessionId: string | null;
   language: string;
   sentence: string;
+  ssml?: boolean;
 };
 
 export type TtsCloseSessionRequest = {

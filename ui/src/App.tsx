@@ -42,6 +42,7 @@ export default function App() {
   const [ttsSentence, setTtsSentence] = useState("");
   const [ttsSentenceEndpoint, setTtsSentenceEndpoint] = useState<TtsStreamEndpoint>("cosyvoice");
   const [ttsSentenceLanguage, setTtsSentenceLanguage] = useState("zh-CN");
+  const [ttsSentenceSsml, setTtsSentenceSsml] = useState(false);
   const [ttsSentenceSessionId, setTtsSentenceSessionId] = useState<string | null>(null);
   const [ttsSentenceStreamState, setTtsSentenceStreamState] = useState("idle");
   const [ttsSentenceError, setTtsSentenceError] = useState<string | null>(null);
@@ -275,7 +276,8 @@ export default function App() {
         {
           sessionId: ttsSentenceSessionId,
           language: ttsSentenceLanguage,
-          sentence
+          sentence,
+          ssml: ttsSentenceSsml
         },
         async (event) => {
           if (ttsSentenceStreamTokenRef.current !== streamToken) {
@@ -373,6 +375,9 @@ export default function App() {
     startNewTtsSentenceStream();
     ttsSentencePlayerRef.current.reset();
     setTtsSentenceEndpoint(endpoint);
+    if (endpoint !== "cosyvoice") {
+      setTtsSentenceSsml(false);
+    }
     setTtsSentenceSessionId(null);
     setTtsSentenceStreamState("idle");
     setTtsSentenceError(null);
@@ -528,6 +533,7 @@ export default function App() {
           sentence={ttsSentence}
           endpoint={ttsSentenceEndpoint}
           language={ttsSentenceLanguage}
+          ssml={ttsSentenceSsml}
           sessionId={ttsSentenceSessionId}
           streamState={ttsSentenceStreamState}
           lastError={ttsSentenceError}
@@ -536,6 +542,7 @@ export default function App() {
           timeline={ttsSentenceTimeline}
           onSentenceChange={setTtsSentence}
           onLanguageChange={setTtsSentenceLanguage}
+          onSsmlChange={setTtsSentenceSsml}
           onEndpointChange={handleTtsSentenceEndpointChange}
           onStart={() => { void handleStartSentenceTts(); }}
           onClose={() => { void handleCloseSentenceTtsSession(); }}

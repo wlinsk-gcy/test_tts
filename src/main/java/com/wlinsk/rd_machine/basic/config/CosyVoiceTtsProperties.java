@@ -14,7 +14,6 @@ public class CosyVoiceTtsProperties {
     private String model = "cosyvoice-v3-flash";
     private int sampleRate = 22050;
     private String format = "pcm";
-    private boolean enableSsml;
     private String zhVoice = "zh_voice";
     private String enVoice = "en_voice";
     private long connectTimeoutMs = 30_000L;

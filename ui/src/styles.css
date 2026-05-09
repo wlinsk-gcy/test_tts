@@ -228,6 +228,20 @@ small {
   color: var(--text);
 }
 
+.tts-lab-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.tts-lab-checkbox input {
+  width: 16px;
+  height: 16px;
+}
+
 .tts-lab-meta {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

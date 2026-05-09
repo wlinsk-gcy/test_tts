@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
@@ -89,15 +90,20 @@ public class CosyVoiceTtsStreamService {
             AtomicReference<String> terminalPhase
     ) {
         String sessionId = resolveSessionId(request, requestId);
-        String taskId = IdUtils.build(null);
+//        String taskId = IdUtils.build(null);
+        String taskId = UUID.randomUUID().toString();
         String language = request != null ? request.language() : null;
+        boolean ssml = request != null && Boolean.TRUE.equals(request.ssml());
         String voice = properties.resolveVoice(language);
+        CosyVoiceConnectionKey connectionKey = CosyVoiceConnectionKey.from(language, ssml);
         log.info(
-                "cosyvoice.stream.start sessionId={} taskId={} eventType=stream-start language={} voice={} textLength={} model={} sampleRate={} format={} elapsedMs=0",
+                "cosyvoice.stream.start sessionId={} taskId={} eventType=stream-start language={} voice={} ssml={} connectionKey={} textLength={} model={} sampleRate={} format={} elapsedMs=0",
                 sessionId,
                 taskId,
                 language,
                 voice,
+                ssml,
+                connectionKey,
                 sentenceLength(request),
                 properties.getModel(),
                 properties.getSampleRate(),
@@ -117,7 +123,7 @@ public class CosyVoiceTtsStreamService {
         }
 
         try {
-            CosyVoiceWebSocketClient connection = connectionPool.acquire();
+            CosyVoiceWebSocketClient connection = connectionPool.acquire(connectionKey);
             activeConnection.set(connection);
             if (!isRunning(terminalPhase)) {
                 log.info(
@@ -136,6 +142,7 @@ public class CosyVoiceTtsStreamService {
                     language,
                     voice,
                     request.sentence(),
+                    ssml,
                     startedAtNs
             );
             CompletableFuture<Void> taskFuture = connection.synthesize(taskRequest, new CosyVoiceTaskListener() {
