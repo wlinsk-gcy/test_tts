@@ -3,6 +3,7 @@
 - 教师对话会话和 HTTP 文章朗读会话，分别维护各自独立的可复用上游 TTS Session。
 - `POST /api/sessions` 和 `POST /api/sessions/{sessionId}/turns` 会在同一个对话 `sessionId` 内跨 Turn 复用一条 TTS Session。
 - `POST /api/tts/sessions/stream` 和 `POST /api/tts/sessions/close` 会在同一个朗读 `sessionId` 内跨句子复用另一条 TTS Session。
+- `POST /api/cosyvoice/tts/stream` 是 CosyVoice v3 Flash 的单次流式合成接口；它的 `sessionId` 只用于前端事件关联和日志追踪，不参与 CosyVoice WebSocket 连接复用。
 - DashScope realtime TTS 统一使用 `rd.ai.tts.mode=server_commit`。
 - 每个教师对话 Turn 或每次 HTTP 句子请求结束时，后端仍会发送一次 `input_text_buffer.commit`，用于 flush 当前缓冲文本，但不会关闭上游 TTS Session。
 - 文章朗读链路会输出 `stream.start`、`text.chunked`、`tts.session.ready`、`tts.first.audio`、`stream.completed`、`stream.timeout`、`stream.error` 等结构化日志。
@@ -595,10 +596,11 @@ pong
 
 # 可复用 TTS Session 接口
 
-当前仓库同时支持两类可复用 TTS Session：
+当前仓库支持两类可复用 TTS Session，并额外提供 CosyVoice 流式合成接口：
 
 - AI 教师对话链路会在同一个阅读 `sessionId` 内跨多个 Turn 复用一条上游 realtime TTS Session。
 - 文章朗读链路会在同一个朗读 `sessionId` 内跨多个句子请求复用另一条上游 realtime TTS Session。
+- CosyVoice 链路不提供按 `sessionId` 关闭或复用的 TTS Session；它复用的是连接池里的 CosyVoice WebSocket 连接，复用条件是 `language` 归一化后的语种和 `ssml` 是否开启。
 
 ## AI 教师对话链路
 
@@ -687,11 +689,96 @@ Request body:
 - 收到 `audio.done` 时，把当前流状态切回 `idle`，此时才允许发送下一句。
 - 收到 `audio.error` 时，当前句也算结束，但前端应先决定重试、跳过还是关闭 Session，再决定是否发送下一句。
 
-如果前端通过 Nginx 反向代理访问该接口，需要给 SSE 接口单独加一段代理配置，不要只复用普通的 `/llk-ai/` 反代。原因是 `POST /api/tts/sessions/stream` 返回的是 `text/event-stream`，如果 Nginx 开着响应缓冲，前端可能会出现“请求已成功但迟迟收不到事件”或者“事件攒到一句结束后才一起返回”。
+### 2. `POST /api/cosyvoice/tts/stream`
+
+- Content-Type: `application/json`
+- Response Content-Type: `text/event-stream`
+- Controller return type: `SseEmitter`
+- 前端调试入口：`TTS Sentence Lab` 里选择 `CosyVoice v3 Flash`
+
+Request body:
+
+```json
+{
+  "sessionId": null,
+  "language": "zh-CN",
+  "sentence": "这是前端准备通过 CosyVoice 朗读的一句话。",
+  "ssml": false
+}
+```
+
+请求字段说明：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `sessionId` | `string \| null` | 否 | 前端事件关联 ID。为空时后端生成一个，并在后续 SSE 事件顶层 `sessionId` 返回。它不是 CosyVoice 连接复用 key。 |
+| `language` | `string` | 否 | 后端用它选择音色和连接池分组。当前 `en*` 归为英文，其它归为中文。 |
+| `sentence` | `string` | 是 | 要合成的文本。为空会返回 `audio.error`。 |
+| `ssml` | `boolean` | 否 | 是否按 SSML 发送给 CosyVoice。默认 `false`。开启后前端应保证 `sentence` 是合法 SSML 文本。 |
+
+行为说明：
+
+- 该接口直接返回 SSE，不走 `Result<T>` 包装。
+- 每次 HTTP 请求对应一次 CosyVoice `taskId`，`taskId` 会放在每条事件的 `data.taskId` 里。
+- `sessionId` 用于让前端把 `audio.chunk`、`audio.done`、`audio.error` 和 `cosyvoice.event` 关联到同一次 UI 流；它不表示一条可关闭的后端 TTS Session。
+- 如果前端不需要跨请求展示同一个 UI 关联 ID，可以每次都传 `sessionId: null`；如果传入上次返回的 `sessionId`，后端只会原样用于事件返回和日志，不会因此绑定或固定某条 CosyVoice 连接。
+- CosyVoice WebSocket 连接由 `CosyVoiceConnectionPool` 复用，连接池 key 是 `CosyVoiceConnectionKey(languageType, ssml)`，其中 `languageType` 只有 `en` / `zh` 两类。
+- 正常完成后，连接会 `releaseReusable` 回连接池；SSE 超时、前端取消、emitter error 或合成失败时，当前连接会被 `discard`。
+- CosyVoice 没有对应的 `/close` 接口。前端“关闭”时应取消当前 `fetch` 流、清空本地 `sessionId` 和播放状态。
+
+SSE 帧示例：
+
+```text
+event: audio.chunk
+data: {"type":"audio.chunk","sessionId":"cosy-ui-session-id","data":{"taskId":"task-id","chunkSeq":1,"audioFormat":"pcm","sampleRate":22050,"chunkBase64":"AAABAAIA..."}}
+```
+
+支持的事件类型：
+
+| 事件类型 | `data` 字段 | 前端处理 |
+| --- | --- | --- |
+| `cosyvoice.event` | `taskId`、`eventType`、`requestId`、`usage`、`payload` | 上游 CosyVoice 状态事件，主要用于调试和时间线展示。不要把它当作音频完成信号。 |
+| `audio.chunk` | `taskId`、`chunkSeq`、`audioFormat`、`sampleRate`、`chunkBase64` | 播放音频分片。CosyVoice 使用 `chunkSeq`，legacy realtime TTS 使用 `segmentSeq`。 |
+| `audio.done` | `taskId` | 当前 CosyVoice 任务正常结束。这是允许发送下一句的推荐信号。 |
+| `audio.error` | `taskId`、`code`、`message` | 当前任务失败。本次请求结束，前端应展示错误并决定重试、跳过或取消。 |
+
+前端接入要点：
+
+- 由于这是 `POST` + SSE，前端应使用 `fetch` + `ReadableStream` 读取响应，不要使用浏览器原生 `EventSource`。
+- 现有封装是 `ui/src/api.ts` 的 `streamTtsSentence(payload, onEvent, "cosyvoice")`，实际请求路径是 `/api/cosyvoice/tts/stream`。
+- CosyVoice 请求会把 `ssml` 字段传给后端；切回 legacy realtime TTS 时，现有调试前端会把 `ssml` 重置为 `false`。
+- 前端收到任意事件后，如果顶层 `event.sessionId` 有值，可以缓存到 UI 状态里用于展示和后续请求关联；但不要调用 `/api/tts/sessions/close` 去关闭它。
+- `audio.chunk` 到达时，把 `data.chunkBase64` 按 `data.sampleRate` 送给 PCM 播放器。不要写死采样率，当前 CosyVoice 默认是 `22050`，legacy realtime TTS 默认是 `24000`。
+- `cosyvoice.event` 只用于展示上游阶段，例如 `task-started`、`task-finished`、`task-failed` 等。真正的播放完成判断应以 `audio.done` 为准。
+- `audio.done` 或 `audio.error` 是终态事件。只有收到终态事件，或当前 `fetch` 被主动取消后，才应允许开始下一次 CosyVoice 请求。
+- 当前调试前端的处理入口在 `ui/src/App.tsx` 的 `handleTtsSentenceEvent()`；按钮和端点切换在 `ui/src/components/TtsSentenceLab.tsx`。
+
+如果前端通过 Nginx 反向代理访问这些 SSE 接口，需要给 SSE 接口单独加代理配置，不要只复用普通的 `/llk-ai/` 反代。原因是 `POST /api/tts/sessions/stream` 和 `POST /api/cosyvoice/tts/stream` 返回的都是 `text/event-stream`，如果 Nginx 开着响应缓冲，前端可能会出现“请求已成功但迟迟收不到事件”或者“事件攒到一句结束后才一起返回”。
 
 推荐配置示例：
 
 ```nginx
+location = /llk-ai/api/cosyvoice/tts/stream {
+    proxy_pass http://127.0.0.1:8080/api/cosyvoice/tts/stream;
+
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Connection "";
+
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+
+    add_header X-Accel-Buffering no always;
+}
+
 location = /llk-ai/api/tts/sessions/stream {
     proxy_pass http://127.0.0.1:8080/api/tts/sessions/stream;
 
@@ -732,11 +819,11 @@ location /llk-ai/ {
 
 Nginx 配置注意事项：
 
-- `/llk-ai/api/tts/sessions/stream` 这个精确匹配的 `location` 要放在通用 `/llk-ai/` 之前。
+- `/llk-ai/api/cosyvoice/tts/stream` 和 `/llk-ai/api/tts/sessions/stream` 这两个精确匹配的 `location` 要放在通用 `/llk-ai/` 之前。
 - SSE 这条链路的关键配置是 `proxy_buffering off;`、`gzip off;`、`add_header X-Accel-Buffering no always;`。
 - `POST /api/tts/sessions/close` 不需要特殊 SSE 配置，继续走普通 `/llk-ai/` 即可。
 
-### 2. `POST /api/tts/sessions/close`
+### 3. `POST /api/tts/sessions/close`
 
 - Content-Type: `application/json`
 - Response: 普通 `Result<Void>`
