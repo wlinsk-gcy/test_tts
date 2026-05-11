@@ -3,7 +3,7 @@
 - 教师对话会话和 HTTP 文章朗读会话，分别维护各自独立的可复用上游 TTS Session。
 - `POST /api/sessions` 和 `POST /api/sessions/{sessionId}/turns` 会在同一个对话 `sessionId` 内跨 Turn 复用一条 TTS Session。
 - `POST /api/tts/sessions/stream` 和 `POST /api/tts/sessions/close` 会在同一个朗读 `sessionId` 内跨句子复用另一条 TTS Session。
-- `POST /api/cosyvoice/tts/stream` 是 CosyVoice v3 Flash 的单次流式合成接口；它的 `sessionId` 只用于前端事件关联和日志追踪，不参与 CosyVoice WebSocket 连接复用。
+- `POST /api/cosyvoice/tts/stream` 是 CosyVoice v3 Flash 的单次流式合成接口；它对前端返回的 SSE 事件结构与 `POST /api/tts/sessions/stream` 对齐，`sessionId` 只用于前端事件关联和日志追踪，不参与 CosyVoice WebSocket 连接复用。
 - DashScope realtime TTS 统一使用 `rd.ai.tts.mode=server_commit`。
 - 每个教师对话 Turn 或每次 HTTP 句子请求结束时，后端仍会发送一次 `input_text_buffer.commit`，用于 flush 当前缓冲文本，但不会关闭上游 TTS Session。
 - 文章朗读链路会输出 `stream.start`、`text.chunked`、`tts.session.ready`、`tts.first.audio`、`stream.completed`、`stream.timeout`、`stream.error` 等结构化日志。
@@ -719,8 +719,9 @@ Request body:
 行为说明：
 
 - 该接口直接返回 SSE，不走 `Result<T>` 包装。
-- 每次 HTTP 请求对应一次 CosyVoice `taskId`，`taskId` 会放在每条事件的 `data.taskId` 里。
-- `sessionId` 用于让前端把 `audio.chunk`、`audio.done`、`audio.error` 和 `cosyvoice.event` 关联到同一次 UI 流；它不表示一条可关闭的后端 TTS Session。
+- 每次 HTTP 请求对应一次内部 CosyVoice `taskId`。`taskId` 只保留在后端日志和上游请求链路里，不会返回给前端 SSE。
+- 对前端返回的事件类型和 `data` 字段与 `POST /api/tts/sessions/stream` 保持一致：`audio.chunk`、`audio.done`、`audio.error`。
+- `sessionId` 用于让前端把当前请求的 `audio.chunk`、`audio.done`、`audio.error` 关联到同一次 UI 流；它不表示一条可关闭的后端 TTS Session。
 - 如果前端不需要跨请求展示同一个 UI 关联 ID，可以每次都传 `sessionId: null`；如果传入上次返回的 `sessionId`，后端只会原样用于事件返回和日志，不会因此绑定或固定某条 CosyVoice 连接。
 - CosyVoice WebSocket 连接由 `CosyVoiceConnectionPool` 复用，连接池 key 是 `CosyVoiceConnectionKey(languageType, ssml)`，其中 `languageType` 只有 `en` / `zh` 两类。
 - 正常完成后，连接会 `releaseReusable` 回连接池；SSE 超时、前端取消、emitter error 或合成失败时，当前连接会被 `discard`。
@@ -730,17 +731,16 @@ SSE 帧示例：
 
 ```text
 event: audio.chunk
-data: {"type":"audio.chunk","sessionId":"cosy-ui-session-id","data":{"taskId":"task-id","chunkSeq":1,"audioFormat":"pcm","sampleRate":22050,"chunkBase64":"AAABAAIA..."}}
+data: {"type":"audio.chunk","sessionId":"cosy-ui-session-id","data":{"segmentSeq":1,"audioFormat":"pcm","sampleRate":22050,"chunkBase64":"AAABAAIA..."}}
 ```
 
 支持的事件类型：
 
 | 事件类型 | `data` 字段 | 前端处理 |
 | --- | --- | --- |
-| `cosyvoice.event` | `taskId`、`eventType`、`requestId`、`usage`、`payload` | 上游 CosyVoice 状态事件，主要用于调试和时间线展示。不要把它当作音频完成信号。 |
-| `audio.chunk` | `taskId`、`chunkSeq`、`audioFormat`、`sampleRate`、`chunkBase64` | 播放音频分片。CosyVoice 使用 `chunkSeq`，legacy realtime TTS 使用 `segmentSeq`。 |
-| `audio.done` | `taskId` | 当前 CosyVoice 任务正常结束。这是允许发送下一句的推荐信号。 |
-| `audio.error` | `taskId`、`code`、`message` | 当前任务失败。本次请求结束，前端应展示错误并决定重试、跳过或取消。 |
+| `audio.chunk` | `segmentSeq`、`audioFormat`、`sampleRate`、`chunkBase64` | 播放音频分片。字段结构与 TtsSession 接口一致。 |
+| `audio.done` | 空对象 | 当前 CosyVoice 任务正常结束。这是允许发送下一句的推荐信号。 |
+| `audio.error` | `code`、`message` | 当前任务失败。本次请求结束，前端应展示错误并决定重试、跳过或取消。 |
 
 前端接入要点：
 
@@ -749,7 +749,7 @@ data: {"type":"audio.chunk","sessionId":"cosy-ui-session-id","data":{"taskId":"t
 - CosyVoice 请求会把 `ssml` 字段传给后端；切回 legacy realtime TTS 时，现有调试前端会把 `ssml` 重置为 `false`。
 - 前端收到任意事件后，如果顶层 `event.sessionId` 有值，可以缓存到 UI 状态里用于展示和后续请求关联；但不要调用 `/api/tts/sessions/close` 去关闭它。
 - `audio.chunk` 到达时，把 `data.chunkBase64` 按 `data.sampleRate` 送给 PCM 播放器。不要写死采样率，当前 CosyVoice 默认是 `22050`，legacy realtime TTS 默认是 `24000`。
-- `cosyvoice.event` 只用于展示上游阶段，例如 `task-started`、`task-finished`、`task-failed` 等。真正的播放完成判断应以 `audio.done` 为准。
+- 前端不需要处理 CosyVoice 专属的 `cosyvoice.event` 或 `taskId`；上游阶段信息只保留在后端日志中。
 - `audio.done` 或 `audio.error` 是终态事件。只有收到终态事件，或当前 `fetch` 被主动取消后，才应允许开始下一次 CosyVoice 请求。
 - 当前调试前端的处理入口在 `ui/src/App.tsx` 的 `handleTtsSentenceEvent()`；按钮和端点切换在 `ui/src/components/TtsSentenceLab.tsx`。
 

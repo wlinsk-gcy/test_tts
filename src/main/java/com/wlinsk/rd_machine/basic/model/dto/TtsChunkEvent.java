@@ -1,7 +1,6 @@
 package com.wlinsk.rd_machine.basic.model.dto;
 
 import java.util.Base64;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 public record TtsChunkEvent(
@@ -46,43 +45,14 @@ public record TtsChunkEvent(
             int sampleRate,
             byte[] audioBytes
     ) {
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("taskId", taskId);
-        data.put("chunkSeq", chunkSeq);
-        data.put("audioFormat", audioFormat);
-        data.put("sampleRate", sampleRate);
-        data.put("chunkBase64", Base64.getEncoder().encodeToString(audioBytes));
-        return new TtsChunkEvent("audio.chunk", sessionId, data);
-    }
-
-    public static TtsChunkEvent cosyVoiceEvent(
-            String sessionId,
-            String taskId,
-            String eventType,
-            String requestId,
-            Object usage,
-            Object payload
-    ) {
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("taskId", taskId);
-        data.put("eventType", eventType);
-        data.put("requestId", requestId);
-        data.put("usage", usage);
-        data.put("payload", payload);
-        return new TtsChunkEvent("cosyvoice.event", sessionId, data);
+        return audioChunk(sessionId, chunkSeq, audioFormat, sampleRate, audioBytes);
     }
 
     public static TtsChunkEvent cosyVoiceAudioDone(String sessionId, String taskId) {
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("taskId", taskId);
-        return new TtsChunkEvent("audio.done", sessionId, data);
+        return audioDone(sessionId);
     }
 
     public static TtsChunkEvent cosyVoiceAudioError(String sessionId, String taskId, String code, String message) {
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("taskId", taskId);
-        data.put("code", code);
-        data.put("message", message);
-        return new TtsChunkEvent("audio.error", sessionId, data);
+        return audioError(sessionId, code, message);
     }
 }

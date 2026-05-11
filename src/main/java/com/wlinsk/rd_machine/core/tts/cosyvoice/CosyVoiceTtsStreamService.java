@@ -148,14 +148,8 @@ public class CosyVoiceTtsStreamService {
             CompletableFuture<Void> taskFuture = connection.synthesize(taskRequest, new CosyVoiceTaskListener() {
                 @Override
                 public void onUpstreamEvent(CosyVoiceUpstreamEvent event) {
-                    sink.emit(TtsChunkEvent.cosyVoiceEvent(
-                            sessionId,
-                            event.taskId(),
-                            event.eventType(),
-                            event.requestId(),
-                            event.usage(),
-                            event.payload()
-                    ));
+                    // Upstream events are still logged in CosyVoiceWebSocketClient; the public SSE
+                    // contract intentionally matches TtsSessionController.
                 }
 
                 @Override
