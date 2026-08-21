@@ -76,8 +76,8 @@ public class AssistantStreamingOrchestrator {
     }
 
     private void streamTurn(String sessionId, ActiveAssistantTurnHandle handle) {
-        ReadingSession session = sessionStore.getRequired(sessionId);
-        if (handle.isCancelled() || session.isClosed()) {
+        ReadingSession session = sessionStore.findById(sessionId).orElse(null);
+        if (session == null || handle.isCancelled() || session.isClosed()) {
             activeTurnRegistry.complete(sessionId, handle);
             return;
         }

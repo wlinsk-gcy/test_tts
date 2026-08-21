@@ -1,5 +1,6 @@
 package com.wlinsk.rd_machine.transport.ws;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
@@ -8,9 +9,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 
+@Slf4j
 @Component
 public class SessionConnectionRegistry {
 
@@ -33,6 +37,24 @@ public class SessionConnectionRegistry {
 
     public List<WebSocketSession> getConnections(String sessionId) {
         return List.copyOf(sessionsByConversation.getOrDefault(sessionId, new CopyOnWriteArraySet<>()));
+    }
+
+    public void closeConnections(String sessionId, CloseStatus status) {
+        List<WebSocketSession> connections = getConnections(sessionId);
+        for (WebSocketSession connection : connections) {
+            try {
+                if (connection.isOpen()) {
+                    synchronized (connection) {
+                        connection.close(status);
+                    }
+                }
+            } catch (IOException exception) {
+                log.warn("Failed to close WebSocket connection for sessionId={}, id={}",
+                        sessionId, connection.getId(), exception);
+            } finally {
+                remove(sessionId, connection);
+            }
+        }
     }
 
     public boolean awaitAtLeastOneConnection(String sessionId, Duration timeout) {

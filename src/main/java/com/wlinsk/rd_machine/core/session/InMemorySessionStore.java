@@ -18,6 +18,10 @@ public class InMemorySessionStore {
         return session;
     }
 
+    public void close(String sessionId) {
+        sessions.remove(sessionId);
+    }
+
     public Optional<ReadingSession> findById(String sessionId) {
         return Optional.ofNullable(sessions.get(sessionId));
     }

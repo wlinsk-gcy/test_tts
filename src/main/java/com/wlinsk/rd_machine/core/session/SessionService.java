@@ -7,12 +7,14 @@ import com.wlinsk.rd_machine.core.streaming.AssistantStreamingOrchestrator;
 import com.wlinsk.rd_machine.basic.model.dto.SessionSnapshotResponse;
 import com.wlinsk.rd_machine.basic.model.dto.SubmitTurnRequest;
 import com.wlinsk.rd_machine.core.tts.AssistantTtsSessionManager;
+import com.wlinsk.rd_machine.transport.ws.SessionConnectionRegistry;
 import com.wlinsk.rd_machine.utils.snowflake.IdUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.socket.CloseStatus;
 
 @Slf4j
 @Service
@@ -22,17 +24,20 @@ public class SessionService {
     private final ActiveAssistantTurnRegistry activeTurnRegistry;
     private final ObjectProvider<AssistantStreamingOrchestrator> orchestratorProvider;
     private final AssistantTtsSessionManager assistantTtsSessionManager;
+    private final SessionConnectionRegistry connectionRegistry;
 
     public SessionService(
             InMemorySessionStore sessionStore,
             ActiveAssistantTurnRegistry activeTurnRegistry,
             ObjectProvider<AssistantStreamingOrchestrator> orchestratorProvider,
-            AssistantTtsSessionManager assistantTtsSessionManager
+            AssistantTtsSessionManager assistantTtsSessionManager,
+            SessionConnectionRegistry connectionRegistry
     ) {
         this.sessionStore = sessionStore;
         this.activeTurnRegistry = activeTurnRegistry;
         this.orchestratorProvider = orchestratorProvider;
         this.assistantTtsSessionManager = assistantTtsSessionManager;
+        this.connectionRegistry = connectionRegistry;
     }
 
     public ReadingSession createSession(String title, String author, String language, String content) {
@@ -76,7 +81,10 @@ public class SessionService {
         session.close();
         activeTurnRegistry.cancel(sessionId);
         assistantTtsSessionManager.close(sessionId);
-        return getSnapshot(sessionId);
+        connectionRegistry.closeConnections(sessionId, CloseStatus.NORMAL);
+        SessionSnapshotResponse snapshot = getSnapshot(sessionId);
+        sessionStore.close(sessionId);
+        return snapshot;
     }
 
     public SessionSnapshotResponse getSnapshot(String sessionId) {
