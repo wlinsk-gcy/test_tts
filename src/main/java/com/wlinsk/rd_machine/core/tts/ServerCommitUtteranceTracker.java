@@ -12,7 +12,7 @@ public final class ServerCommitUtteranceTracker {
     private int lastAssignedSegmentSeq;
     private boolean inputCommitted;
     private boolean anyInputAppended;
-    private boolean audioCompleted;
+    private boolean sawResponseCreated;
 
     public synchronized void markSegmentAppended(int segmentSeq) {
         pendingSegmentSeqs.addLast(segmentSeq);
@@ -21,6 +21,7 @@ public final class ServerCommitUtteranceTracker {
 
     public synchronized int markResponseCreated() {
         activeResponses += 1;
+        sawResponseCreated = true;
         Integer assignedSegmentSeq = pendingSegmentSeqs.pollFirst();
         pendingSegmentSeqs.clear();
         if (assignedSegmentSeq != null) {
@@ -33,6 +34,7 @@ public final class ServerCommitUtteranceTracker {
         if (activeResponses > 0) {
             activeResponses -= 1;
         }
+        completeIfFinished();
     }
 
     public synchronized void markInputCommitted() {
@@ -41,7 +43,6 @@ public final class ServerCommitUtteranceTracker {
     }
 
     public synchronized void markAudioDone() {
-        audioCompleted = true;
         completeIfFinished();
     }
 
@@ -58,7 +59,10 @@ public final class ServerCommitUtteranceTracker {
     }
 
     private void completeIfFinished() {
-        if (inputCommitted && (!anyInputAppended || audioCompleted)) {
+        // Complete only once every created response has reported response.done. response.done carries the
+        // billing usage and always follows response.audio.done, so gating on it (rather than audio.done)
+        // guarantees the final segment's usage is captured before the utterance is torn down.
+        if (inputCommitted && (!anyInputAppended || (sawResponseCreated && activeResponses == 0))) {
             completion.complete(null);
         }
     }

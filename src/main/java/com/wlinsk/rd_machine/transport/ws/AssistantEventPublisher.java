@@ -3,6 +3,7 @@ package com.wlinsk.rd_machine.transport.ws;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wlinsk.rd_machine.basic.logging.WebSocketAccessLogHelper;
+import com.wlinsk.rd_machine.basic.model.bo.LlmUsage;
 import com.wlinsk.rd_machine.basic.model.bo.StreamingSessionContext;
 import java.util.Base64;
 import java.util.List;
@@ -88,6 +89,27 @@ public class AssistantEventPublisher {
                 context.turnNo(),
                 context.roundNo(),
                 Map.of("awaitingStudentAnswer", awaitingStudentAnswer)
+        ));
+    }
+
+    public void publishUsage(StreamingSessionContext context, LlmUsage llmUsage, long ttsCharacters) {
+        Map<String, Object> llm = llmUsage == null
+                ? Map.of()
+                : Map.of(
+                        "promptTokens", llmUsage.promptTokens(),
+                        "completionTokens", llmUsage.completionTokens(),
+                        "totalTokens", llmUsage.totalTokens(),
+                        "promptTokensDetails", Map.of("cachedTokens", llmUsage.cachedTokens())
+                );
+        publish(new AssistantEvent(
+                "assistant.usage",
+                context.sessionId(),
+                context.turnNo(),
+                context.roundNo(),
+                Map.of(
+                        "llm", llm,
+                        "tts", Map.of("characters", ttsCharacters)
+                )
         ));
     }
 

@@ -49,6 +49,18 @@ export type TtsCloseSessionRequest = {
   sessionId: string;
 };
 
+export type AssistantUsage = {
+  turnNo: number;
+  roundNo: number;
+  llm: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    cachedTokens: number;
+  };
+  ttsCharacters: number;
+};
+
 export type TtsStreamEndpoint = "cosyvoice" | "legacy";
 
 export type TtsChunkEventType = "cosyvoice.event" | "audio.chunk" | "audio.done" | "audio.error";
@@ -90,6 +102,7 @@ export type AssistantEventType =
   | "assistant.text.done"
   | "assistant.audio.chunk"
   | "assistant.audio.done"
+  | "assistant.usage"
   | "assistant.turn.done"
   | "assistant.error"
   | "assistant.debug.timing";

@@ -23,6 +23,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
@@ -98,6 +99,8 @@ public class AssistantStreamingOrchestrator {
         AtomicBoolean sawFirstTextDelta = new AtomicBoolean();
         AtomicBoolean sawFirstAudioChunk = new AtomicBoolean();
         AtomicReference<Throwable> fatalFailure = new AtomicReference<>();
+        AtomicReference<LlmUsage> llmUsageRef = new AtomicReference<>();
+        AtomicLong ttsCharacters = new AtomicLong();
 
         try {
             if (handle.isCancelled() || session.isClosed()) {
@@ -125,6 +128,13 @@ public class AssistantStreamingOrchestrator {
                             publishTiming(context, "tts.first.audio", System.currentTimeMillis(), turnStartedAtNs);
                         }
                         eventPublisher.publishAudioChunk(context, segmentSeq, ttsService.responseFormat(), ttsService.sampleRate(), audioBytes);
+                    }
+
+                    @Override
+                    public void onUsage(TtsUsage usage) {
+                        if (usage != null) {
+                            ttsCharacters.addAndGet(usage.characters());
+                        }
                     }
 
                     @Override
@@ -178,7 +188,8 @@ public class AssistantStreamingOrchestrator {
                 }
 
                 @Override
-                public void onComplete() {
+                public void onComplete(LlmUsage usage) {
+                    llmUsageRef.set(usage);
                     throwIfFatalFailure(fatalFailure);
                     if (handle.isCancelled() || session.isClosed()) {
                         return;
@@ -228,6 +239,7 @@ public class AssistantStreamingOrchestrator {
             }
             session.markAssistantTurnCompleted(fullText.toString());
             publishTiming(context, "turn.completed", System.currentTimeMillis(), turnStartedAtNs);
+            eventPublisher.publishUsage(context, llmUsageRef.get(), ttsCharacters.get());
             eventPublisher.publishTurnDone(context, session.isAwaitingStudentAnswer());
         } catch (CancellationException exception) {
             Thread.interrupted();

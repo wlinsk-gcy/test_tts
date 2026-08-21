@@ -17,7 +17,7 @@ import { EventTimeline } from "./components/EventTimeline";
 import { SessionPanel } from "./components/SessionPanel";
 import { StudentInputPanel } from "./components/StudentInputPanel";
 import { TtsSentenceLab } from "./components/TtsSentenceLab";
-import type { AssistantEvent, DebugArticle, MetricsState, TimelineEntry, TtsChunkEvent, TtsStreamEndpoint } from "./types";
+import type { AssistantEvent, AssistantUsage, DebugArticle, MetricsState, TimelineEntry, TtsChunkEvent, TtsStreamEndpoint } from "./types";
 import { openSessionSocket } from "./ws";
 
 const MAX_TIMELINE = 120;
@@ -38,6 +38,7 @@ export default function App() {
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [lastError, setLastError] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricsState>({});
+  const [assistantUsage, setAssistantUsage] = useState<AssistantUsage | null>(null);
   const [playerVersion, setPlayerVersion] = useState(0);
   const [ttsSentence, setTtsSentence] = useState("");
   const [ttsSentenceEndpoint, setTtsSentenceEndpoint] = useState<TtsStreamEndpoint>("cosyvoice");
@@ -186,6 +187,31 @@ export default function App() {
         setMetrics((previous) => ({ ...previous, audioDoneAt: now }));
         setPlayerVersion((value) => value + 1);
         pushTimeline(setTimeline, { at: now, label: event.type });
+        break;
+      }
+      case "assistant.usage": {
+        const llm = (event.data.llm ?? {}) as Record<string, unknown>;
+        const tts = (event.data.tts ?? {}) as Record<string, unknown>;
+        const promptTokensDetails = (llm.promptTokensDetails ?? {}) as Record<string, unknown>;
+        const usage: AssistantUsage = {
+          turnNo: event.turnNo,
+          roundNo: event.roundNo,
+          llm: {
+            promptTokens: Number(llm.promptTokens ?? 0),
+            completionTokens: Number(llm.completionTokens ?? 0),
+            totalTokens: Number(llm.totalTokens ?? 0),
+            cachedTokens: Number(promptTokensDetails.cachedTokens ?? 0)
+          },
+          ttsCharacters: Number(tts.characters ?? 0)
+        };
+        setAssistantUsage(usage);
+        // Billing hook: register this turn's LLM token usage + TTS characters here.
+        console.info("[billing] assistant.usage", usage);
+        pushTimeline(setTimeline, {
+          at: now,
+          label: event.type,
+          detail: `llm.total=${usage.llm.totalTokens} (cached=${usage.llm.cachedTokens}), tts.characters=${usage.ttsCharacters}`
+        });
         break;
       }
       case "assistant.turn.done": {
@@ -504,6 +530,14 @@ export default function App() {
         </div>
         <button className="ghost-button" type="button" onClick={() => setTimeline([])}>Clear Timeline</button>
       </header>
+
+      {assistantUsage ? (
+        <p className="subcopy" data-testid="assistant-usage">
+          Billing · turn {assistantUsage.turnNo}: LLM {assistantUsage.llm.totalTokens} tokens
+          (prompt {assistantUsage.llm.promptTokens}, completion {assistantUsage.llm.completionTokens},
+          cached {assistantUsage.llm.cachedTokens}) · TTS {assistantUsage.ttsCharacters} characters
+        </p>
+      ) : null}
 
       <div className="dashboard-grid">
         <ArticleList

@@ -351,6 +351,7 @@ pong
 | `assistant.text.done` | `text` | 教师端本回合完整文本 |
 | `assistant.audio.chunk` | `segmentSeq`、`audioFormat`、`sampleRate`、`chunkBase64` | TTS 音频分片 |
 | `assistant.audio.done` | 无 | 音频流结束 |
+| `assistant.usage` | `llm`、`tts` | 本轮计费用量（LLM token + TTS 字符数） |
 | `assistant.turn.done` | `awaitingStudentAnswer` | 本轮教师端处理完成 |
 | `assistant.error` | `code`、`message` | 本轮流式生成失败 |
 
@@ -512,7 +513,53 @@ pong
 - 即使当前没有开启 TTS，后端也会在文本完成后补发一个 `assistant.audio.done`
 - 所以前端不能假设“收到 `assistant.audio.done` 之前一定出现过 `assistant.audio.chunk`”
 
-#### 6. `assistant.turn.done`
+#### 6. `assistant.usage`
+
+`data` 字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `llm` | `object` | LLM 本轮 token 用量；provider 未返回 usage 时各字段兜底为 `0`（服务端会打 `warn` 日志） |
+| `llm.promptTokens` | `integer` | 输入（prompt）token 数 |
+| `llm.completionTokens` | `integer` | 输出（completion）token 数 |
+| `llm.totalTokens` | `integer` | 总 token 数 |
+| `llm.promptTokensDetails.cachedTokens` | `integer` | 命中缓存的 prompt token 数 |
+| `tts` | `object` | TTS 本轮计费用量 |
+| `tts.characters` | `integer` | Qwen3-TTS 计费字符数（本轮所有 `response.done` 的 `usage.characters` 累加；缺失时按 `0` 兜底并打 `warn` 日志） |
+
+数据包示例：
+
+```json
+{
+  "type": "assistant.usage",
+  "sessionId": "0c5b6de6-7f77-4d76-9303-31c0324d5a65",
+  "turnNo": 1,
+  "roundNo": 1,
+  "data": {
+    "llm": {
+      "promptTokens": 3019,
+      "completionTokens": 104,
+      "totalTokens": 3123,
+      "promptTokensDetails": {
+        "cachedTokens": 2048
+      }
+    },
+    "tts": {
+      "characters": 25
+    }
+  }
+}
+```
+
+联调注意：
+
+- 该事件在 `assistant.turn.done` 之前推送，是本轮的最后一个计费数据事件，前端可用它去登记计费
+- LLM 用量来自 chat completions 请求里的 `stream_options.include_usage=true`，在流式最后一个 chunk 返回
+- TTS 用量来自 realtime 服务端 `response.done` 事件的 `usage.characters`；`server_commit` 模式下一轮可能有多个 `response.done`，后端已累加求和
+- 兜底策略：LLM 缺 usage 或 TTS 缺 `usage.characters` 时，对应用量按 `0` 计并在服务端打 `warn` 日志，事件仍照常推送（字段结构始终完整，便于前端稳定解析）
+- 前端消费入口：`ui/src/App.tsx` 中 `assistant.usage` 分支（含 `console.info("[billing", ...)` 计费登记挂载点）
+
+#### 7. `assistant.turn.done`
 
 `data` 字段：
 
@@ -542,7 +589,7 @@ pong
   - `ui/src/App.tsx` 中 `assistant.turn.done` 分支
   - `ui/src/api.ts` 中 `fetchSessionSnapshot()`
 
-#### 7. `assistant.error`
+#### 8. `assistant.error`
 
 `data` 字段：
 

@@ -8,7 +8,9 @@ import com.wlinsk.rd_machine.basic.exception.BasicException;
 import com.wlinsk.rd_machine.basic.logging.ReadingTtsLogHelper;
 import com.wlinsk.rd_machine.basic.model.bo.TextSegment;
 import com.wlinsk.rd_machine.basic.model.bo.TtsSynthesisRequest;
+import com.wlinsk.rd_machine.basic.model.bo.TtsUsage;
 import com.wlinsk.rd_machine.utils.snowflake.IdUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
@@ -26,6 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+@Slf4j
 @Component
 public class AliyunRealtimeTtsClient {
 
@@ -162,7 +165,7 @@ public class AliyunRealtimeTtsClient {
                     case "response.created" -> markResponseCreated();
                     case "response.audio.delta" -> forwardAudioChunk(root.path("delta").asText());
                     case "response.audio.done" -> markAudioDone();
-                    case "response.done" -> markResponseDone();
+                    case "response.done" -> markResponseDone(root);
                     case "error" -> failSession(new IllegalStateException(payload));
                     default -> {
                     }
@@ -210,11 +213,22 @@ public class AliyunRealtimeTtsClient {
             }
         }
 
-        private void markResponseDone() {
+        private void markResponseDone(JsonNode root) {
             QueuedTtsUtterance utterance = currentUtterance.get();
-            if (utterance != null) {
-                utterance.markResponseDone();
+            if (utterance == null) {
+                return;
             }
+            JsonNode charactersNode = root.path("response").path("usage").path("characters");
+            long characters;
+            if (charactersNode.isMissingNode() || charactersNode.isNull() || !charactersNode.isNumber()) {
+                log.warn("TTS response.done missing usage.characters; defaulting to 0. upstreamSessionId={}, voice={}",
+                        upstreamSessionId, request.voice());
+                characters = 0L;
+            } else {
+                characters = charactersNode.asLong();
+            }
+            utterance.audioListener().onUsage(new TtsUsage(characters));
+            utterance.markResponseDone();
         }
 
         private void markAudioDone() {
