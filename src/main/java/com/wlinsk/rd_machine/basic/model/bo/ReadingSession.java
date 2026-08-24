@@ -19,6 +19,7 @@ public class ReadingSession {
     private int currentRoundNo;
     private int currentTurnNo;
     private boolean awaitingStudentAnswer;
+    private boolean lastRound;
     private String lastAssistantMessageText;
     private Long lastClientSeq;
     private Instant updatedAt;
@@ -43,7 +44,7 @@ public class ReadingSession {
         touch();
     }
 
-    public synchronized boolean acceptStudentAnswer(long clientSeq, String rawText) {
+    public synchronized boolean acceptStudentAnswer(long clientSeq, String rawText, boolean lastRound) {
         if (status == SessionStatus.CLOSED) {
             throw new IllegalStateException("Session is closed");
         }
@@ -65,6 +66,7 @@ public class ReadingSession {
                 Instant.now()
         ));
         lastClientSeq = clientSeq;
+        this.lastRound = lastRound;
         currentRoundNo = currentRoundNo + 1;
         currentTurnNo = currentTurnNo + 1;
         status = SessionStatus.GENERATING;

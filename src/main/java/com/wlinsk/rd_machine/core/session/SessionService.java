@@ -55,9 +55,10 @@ public class SessionService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Session is closed");
         }
         long clientSeq = request.clientSeq() == null ? session.getCurrentTurnNo() : request.clientSeq();
+        boolean lastRound = request.isLastRound() != null && request.isLastRound() == 1;
         boolean accepted;
         try {
-            accepted = session.acceptStudentAnswer(clientSeq, request.text());
+            accepted = session.acceptStudentAnswer(clientSeq, request.text(), lastRound);
         } catch (IllegalStateException exception) {
             log.error("acceptStudentAnswer error: ", exception);
             throw new ResponseStatusException(HttpStatus.CONFLICT, exception.getMessage(), exception);

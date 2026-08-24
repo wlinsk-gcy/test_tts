@@ -27,6 +27,7 @@ public class PromptBuilder {
     private static final String SYSTEM_RULES = "You are a reading-comprehension teacher. Base every reply only on the provided article. Keep replies suitable for speech output: natural, concise, stable, with no Markdown, HTML, emoji, or bullet lists. Keep each reply within 3 to 5 sentences. If ASR may have distorted the student's answer, interpret it gently from context instead of calling out recognition mistakes. Reply in the article language. Do not end the session on your own. The conversation ends only when the client closes the session.";
     private static final String OPENING_CLOSING = "Ask exactly one clear opening question.";
     private static final String FOLLOW_UP_CLOSING = "Respond briefly to the student's latest answer, then ask exactly one clear next question. If the student is struggling, lower the difficulty or give a hint instead of repeating the same wording.";
+    private static final String WRAP_UP_CLOSING = "Respond briefly to the student's latest answer, then give short encouragement and praise, and finally invite the student to click the button below to end the conversation. Do not ask any new question.";
 
     private final RoundPlanner roundPlanner;
 
@@ -80,8 +81,15 @@ public class PromptBuilder {
         builder.append("<turnGoal>")
                 .append(escapeXml(goal.instruction()))
                 .append("</turnGoal>\n")
-                .append(goal.roundNo() <= 1 ? OPENING_CLOSING : FOLLOW_UP_CLOSING);
+                .append(closingFor(goal));
         return builder.toString();
+    }
+
+    private String closingFor(RoundGoal goal) {
+        if ("closing".equals(goal.title())) {
+            return WRAP_UP_CLOSING;
+        }
+        return goal.roundNo() <= 1 ? OPENING_CLOSING : FOLLOW_UP_CLOSING;
     }
 
     private boolean hasText(String value) {

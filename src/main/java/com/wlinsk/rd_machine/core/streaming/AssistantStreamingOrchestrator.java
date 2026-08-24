@@ -89,7 +89,9 @@ public class AssistantStreamingOrchestrator {
         long turnStartedAtNs = System.nanoTime();
         Thread turnThread = Thread.currentThread();
         publishTiming(context, "turn.start", turnStartedAtMs, turnStartedAtNs);
-        RoundGoal roundGoal = roundPlanner.goalForRound(roundNo);
+        RoundGoal roundGoal = session.isLastRound()
+                ? roundPlanner.wrapUpGoalForRound(roundNo)
+                : roundPlanner.goalForRound(roundNo);
         PromptContext promptContext = new PromptContext(session, roundGoal);
         List<LlmMessage> messages = promptBuilder.buildMessages(promptContext);
         StringBuilder fullText = new StringBuilder();

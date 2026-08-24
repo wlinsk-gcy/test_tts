@@ -28,6 +28,7 @@ export type CreateSessionResponse = {
 export type SubmitTurnRequest = {
   clientSeq?: number;
   text: string;
+  isLastRound?: number;
 };
 
 export type SubmitTurnResponse = {
