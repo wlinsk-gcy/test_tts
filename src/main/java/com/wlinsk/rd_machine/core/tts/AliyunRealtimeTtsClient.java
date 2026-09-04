@@ -74,15 +74,16 @@ public class AliyunRealtimeTtsClient {
         private final AtomicReference<QueuedTtsUtterance> currentUtterance = new AtomicReference<>();
         private final AtomicInteger currentSegmentSeq = new AtomicInteger();
         private final StringBuilder textBuffer = new StringBuilder();
-        private final AtomicBoolean utteranceActive = new AtomicBoolean();
+        private final AtomicBoolean utteranceActive = new AtomicBoolean(); // 用CAS保证同一条Session 同一时刻只能有一个utterance，并发的话，会抛TTS_SESSION_BUSY
         private final AtomicBoolean closed = new AtomicBoolean();
         private final String upstreamSessionId = IdUtils.build(null);
         private volatile WebSocket webSocket;
 
+        // 连接层的Session，一个RealtimeTtsSessionConnection = 一条到阿里云的WebSocket连接，跨多轮复用，直到关闭或超时
         private RealtimeTtsSessionConnection(TtsSynthesisRequest request) {
             this.request = request;
             this.webSocketFuture = httpClient.newWebSocketBuilder()
-                    .header("Authorization", "Bearer " + properties.getApiKey())
+                    .header("Authorization", "Bearer " + properties.getApiKey()) // 携带API-KEY完成认证
                     .buildAsync(resolveUri(), this);
             this.webSocketFuture.whenComplete((openedWebSocket, throwable) -> {
                 if (throwable != null) {
@@ -90,7 +91,7 @@ public class AliyunRealtimeTtsClient {
                     return;
                 }
                 this.webSocket = openedWebSocket;
-                sendSessionUpdate();
+                sendSessionUpdate(); // 连接建立后发送客户端事件 session.update -- 上游阿里云回应 session.updated 被 handleServerEvent 接收
             });
         }
 
@@ -160,8 +161,9 @@ public class AliyunRealtimeTtsClient {
                 JsonNode root = objectMapper.readTree(payload);
                 String type = root.path("type").asText();
                 logUpstreamEvent(type, root);
+                // 当前是server_commit模式，上游会自动分局，一轮任务里可能产生多组response.created...response.done
                 switch (type) {
-                    case "session.updated" -> sessionReady.complete(null);
+                    case "session.updated" -> sessionReady.complete(null); // 之后一直保持完成状态，复用轮次不必再握手
                     case "response.created" -> markResponseCreated();
                     case "response.audio.delta" -> forwardAudioChunk(root.path("delta").asText());
                     case "response.audio.done" -> markAudioDone();
@@ -285,23 +287,27 @@ public class AliyunRealtimeTtsClient {
 
         private void drainUtterance(QueuedTtsUtterance utterance) {
             try {
+                // 最多等10秒，等待tts引擎建立连接
                 sessionReady.orTimeout(10, TimeUnit.SECONDS).join();
-                utterance.audioListener().onSessionReady();
+                utterance.audioListener().onSessionReady(); // 回调 onSessionReady
                 while (true) {
                     TextSegment segment = utterance.queue().take();
                     if (segment.segmentSeq() < 0) {
+                        // LLM Stream 消费完之后，会执行一个finish操作，发一个Seq=-1的Segment到队列中
                         break;
                     }
                     utterance.markSegmentAppended(segment.segmentSeq());
-                    sendAppend(segment.text());
+                    // 队列取出chunk，发 input_text_buffer.append事件给Qwen3-tts
+                    sendAppend(segment.text()); // 只append，因为tts.mode是server_commit
+                    // server_commit 我们只管append，上游阿里云自动检测语义边界，就直接返回音频chunk，不需要等我们sendCommit才返回。
                 }
                 if (closed.get() || utterance.isTerminal()) {
                     return;
                 }
                 if (utterance.hasAnyInputAppended()) {
                     utterance.markInputCommitted();
-                    sendCommit();
-                    utterance.awaitResponseCompletion(Duration.ofSeconds(30));
+                    sendCommit(); // 在server_commit模式下，commit的作用是冲刷尾巴，避免缓冲区里可能剩下的最后一小段没有自动切分边界的文本一直没输出成音频。
+                    utterance.awaitResponseCompletion(Duration.ofSeconds(30)); // 最多等30秒，等上游阿里云收尾
                 }
                 utterance.completeSuccessfully();
             } catch (Exception exception) {

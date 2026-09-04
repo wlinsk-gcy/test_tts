@@ -221,6 +221,7 @@ public class AssistantStreamingOrchestrator {
                 if (handle.isCancelled()) {
                     return;
                 }
+                // LLM Stream 消费完，会发一个finish信号给Utterance，结束内部的while循环
                 ttsUtterance.finish();
                 throwIfFatalFailure(fatalFailure);
                 if (handle.isCancelled()) {

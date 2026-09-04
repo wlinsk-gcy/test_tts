@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
+// 任务层的 Utterance，一次 StreamTurn（一轮对话）的合成任务，每轮会新建一个，用完即弃
 public final class QueuedTtsUtterance implements TtsUtterance {
 
     static final TextSegment FINISH_SENTINEL = new TextSegment(-1, "");

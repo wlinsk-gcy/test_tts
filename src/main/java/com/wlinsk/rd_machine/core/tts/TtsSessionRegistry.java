@@ -39,6 +39,7 @@ public class TtsSessionRegistry {
     }
 
     public synchronized TtsSessionRef getOrCreate(String requestedSessionId, String language) {
+        // 清掉空闲超时(idleTimeoutMs=300s) 或上游已关闭(isClose())的session
         evictExpiredSessions();
         String sessionId = requestedSessionId == null || requestedSessionId.isBlank()
                 ? IdUtils.build(null)
@@ -46,10 +47,12 @@ public class TtsSessionRegistry {
         RegisteredTtsSession existing = sessions.get(sessionId);
         if (existing != null) {
             existing.assertLanguage(language);
+            // 刷新lastAccessAt
             existing.touch(clock.instant());
             ReadingTtsLogHelper.logPhase(null, sessionId, language, "session.reused", null, Map.of());
-            return existing.sessionRef();
+            return existing.sessionRef(); // 复用同一条websocket连接
         }
+        // max=128
         if (sessions.size() >= maxActiveSessions) {
             throw new BasicException(SysCode.TTS_SESSION_LIMIT_REACHED);
         }
