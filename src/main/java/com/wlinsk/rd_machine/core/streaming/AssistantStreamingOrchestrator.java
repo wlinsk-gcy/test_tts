@@ -9,6 +9,7 @@ import com.wlinsk.rd_machine.core.llm.prompt.PromptBuilder;
 import com.wlinsk.rd_machine.core.llm.prompt.RoundPlanner;
 import com.wlinsk.rd_machine.core.session.InMemorySessionStore;
 import com.wlinsk.rd_machine.core.tts.*;
+import com.wlinsk.rd_machine.core.tts.qwenaudio.QwenAudioTtsService;
 import com.wlinsk.rd_machine.transport.ws.AssistantEventPublisher;
 import com.wlinsk.rd_machine.transport.ws.SessionConnectionRegistry;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +24,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -38,7 +40,7 @@ public class AssistantStreamingOrchestrator {
     private final RoundPlanner roundPlanner;
     private final PromptBuilder promptBuilder;
     private final LlmClient llmClient;
-    private final AliyunRealtimeTtsService ttsService;
+    private final QwenAudioTtsService ttsService;
     private final AssistantTtsSessionManager assistantTtsSessionManager;
     private final AssistantEventPublisher eventPublisher;
     private final SessionConnectionRegistry connectionRegistry;
@@ -50,7 +52,7 @@ public class AssistantStreamingOrchestrator {
             RoundPlanner roundPlanner,
             PromptBuilder promptBuilder,
             LlmClient llmClient,
-            AliyunRealtimeTtsService ttsService,
+            QwenAudioTtsService ttsService,
             AssistantTtsSessionManager assistantTtsSessionManager,
             AssistantEventPublisher eventPublisher,
             SessionConnectionRegistry connectionRegistry,
@@ -95,7 +97,6 @@ public class AssistantStreamingOrchestrator {
         PromptContext promptContext = new PromptContext(session, roundGoal);
         List<LlmMessage> messages = promptBuilder.buildMessages(promptContext);
         StringBuilder fullText = new StringBuilder();
-        TextSegmenter textSegmenter = ttsService.createTextSegmenter();
         TtsRealtimeSession ttsRealtimeSession = null;
         TtsUtterance ttsUtterance = null;
         AtomicBoolean sawFirstTextDelta = new AtomicBoolean();
@@ -103,6 +104,7 @@ public class AssistantStreamingOrchestrator {
         AtomicReference<Throwable> fatalFailure = new AtomicReference<>();
         AtomicReference<LlmUsage> llmUsageRef = new AtomicReference<>();
         AtomicLong ttsCharacters = new AtomicLong();
+        AtomicInteger nextTtsChunkSequence = new AtomicInteger(1);
 
         try {
             if (handle.isCancelled() || session.isClosed()) {
@@ -134,9 +136,7 @@ public class AssistantStreamingOrchestrator {
 
                     @Override
                     public void onUsage(TtsUsage usage) {
-                        if (usage != null) {
-                            ttsCharacters.addAndGet(usage.characters());
-                        }
+                        recordTtsUsage(ttsCharacters, usage);
                     }
 
                     @Override
@@ -177,15 +177,17 @@ public class AssistantStreamingOrchestrator {
 
                     fullText.append(delta);
                     eventPublisher.publishTextDelta(context, delta);
-                    List<TextSegment> segments = toTtsSegments(textSegmenter.append(delta), session.getArticle().language());
-                    if (finalTtsUtterance != null) {
-                        for (TextSegment segment : segments) {
-                            throwIfFatalFailure(fatalFailure);
-                            if (handle.isCancelled()) {
-                                throw new CancellationException("Session closed");
-                            }
-                            finalTtsUtterance.enqueue(segment);
+                    TextSegment ttsChunk = toTtsChunk(
+                            delta,
+                            nextTtsChunkSequence.getAndIncrement(),
+                            session.getArticle().language()
+                    );
+                    if (finalTtsUtterance != null && ttsChunk != null) {
+                        throwIfFatalFailure(fatalFailure);
+                        if (handle.isCancelled()) {
+                            throw new CancellationException("Session closed");
                         }
+                        finalTtsUtterance.enqueue(ttsChunk);
                     }
                 }
 
@@ -197,11 +199,6 @@ public class AssistantStreamingOrchestrator {
                         return;
                     }
                     publishTiming(context, "llm.stream.completed", System.currentTimeMillis(), turnStartedAtNs);
-                    TextSegment remaining = textSegmenter.flushRemaining();
-                    if (finalTtsUtterance != null && remaining != null) {
-                        throwIfFatalFailure(fatalFailure);
-                        finalTtsUtterance.enqueue(toTtsSegment(remaining, session.getArticle().language()));
-                    }
                 }
 
                 @Override
@@ -227,7 +224,7 @@ public class AssistantStreamingOrchestrator {
                 if (handle.isCancelled()) {
                     return;
                 }
-                ttsUtterance.awaitFinished(Duration.ofSeconds(60));
+                ttsUtterance.awaitFinished(ttsService.taskTimeout());
                 throwIfFatalFailure(fatalFailure);
             } else {
                 if (handle.isCancelled()) {
@@ -293,14 +290,17 @@ public class AssistantStreamingOrchestrator {
         return defaultCode.getCode();
     }
 
-    public static List<TextSegment> toTtsSegments(List<TextSegment> segments, String language) {
-        return segments.stream()
-                .map(segment -> toTtsSegment(segment, language))
-                .toList();
+    public static TextSegment toTtsChunk(String chunk, int sequence, String language) {
+        if (chunk == null || chunk.isBlank()) {
+            return null;
+        }
+        return TtsTextNormalizer.normalize(new TextSegment(sequence, chunk), language);
     }
 
-    public static TextSegment toTtsSegment(TextSegment segment, String language) {
-        return TtsTextNormalizer.normalize(segment, language);
+    public static void recordTtsUsage(AtomicLong target, TtsUsage usage) {
+        if (target != null && usage != null) {
+            target.set(usage.characters());
+        }
     }
 
     private Throwable normalizeFailure(Throwable throwable) {

@@ -8,39 +8,23 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class AiTtsProperties {
 
     private String apiKey;
-    private String wsUrl;
-    private String model;
-    private String zhVoice = "Ethan";
-    private String enVoice = "Aiden";
+    private String wsUrl = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
+    private String model = "qwen-audio-3.0-tts-flash";
+    private String zhVoice = "longanhuan_v3.6";
+    private String enVoice = "loongmary";
     private int sampleRate = 24000;
-    private String mode = "server_commit";
     private String responseFormat = "pcm";
-    private int segmentQueueCapacity = 32;
-    private boolean debugLogUpstreamEvents;
-    private Commit commit = new Commit();
+    private int streamQueueCapacity = 32;
+    private long taskTimeoutMs = 60_000L;
+    private Pool pool = new Pool();
     private Session session = new Session();
-
-    public void setCommit(Commit commit) {
-        this.commit = commit == null ? new Commit() : commit;
-    }
 
     public void setSession(Session session) {
         this.session = session == null ? new Session() : session;
     }
 
-    public String normalizedMode() {
-        return "server_commit";
-    }
-
-    @Data
-    public static class Commit {
-
-        private int minLength = 8;
-        private int maxLength = 28;
-        private long maxWaitMs = 250L;
-        private String softPunctuation = ",\uFF0C";
-        private String hardPunctuation = ".!?\u3002\uFF01\uFF1F";
-
+    public void setPool(Pool pool) {
+        this.pool = pool == null ? new Pool() : pool;
     }
 
     @Data
@@ -48,5 +32,12 @@ public class AiTtsProperties {
 
         private int maxActiveSessions = 128;
         private long idleTimeoutMs = 300_000L;
+    }
+
+    @Data
+    public static class Pool {
+
+        private int maxTotal = 16;
+        private long borrowTimeoutMs = 3_000L;
     }
 }

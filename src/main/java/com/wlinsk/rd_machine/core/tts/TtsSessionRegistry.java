@@ -50,7 +50,7 @@ public class TtsSessionRegistry {
             // 刷新lastAccessAt
             existing.touch(clock.instant());
             ReadingTtsLogHelper.logPhase(null, sessionId, language, "session.reused", null, Map.of());
-            return existing.sessionRef(); // 复用同一条websocket连接
+            return existing.sessionRef(); // 复用逻辑会话；每轮任务从全局池借用暖连接
         }
         // max=128
         if (sessions.size() >= maxActiveSessions) {

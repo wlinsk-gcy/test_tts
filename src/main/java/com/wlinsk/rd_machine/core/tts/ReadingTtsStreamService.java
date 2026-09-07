@@ -8,7 +8,6 @@ import com.wlinsk.rd_machine.basic.model.bo.TextSegment;
 import com.wlinsk.rd_machine.basic.model.bo.TtsSessionRef;
 import com.wlinsk.rd_machine.basic.model.dto.TtsChunkEvent;
 import com.wlinsk.rd_machine.basic.model.dto.TtsSentenceStreamRequest;
-import com.wlinsk.rd_machine.core.streaming.TextSegmenter;
 import com.wlinsk.rd_machine.utils.snowflake.IdUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +18,6 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -34,7 +32,6 @@ public class ReadingTtsStreamService {
     private static final Duration STREAM_TIMEOUT = Duration.ofMinutes(5);
 
     private final ReadingTtsSessionManager sessionManager;
-    private final TtsTextChunker textChunker;
     private final AiTtsProperties properties;
     private final ExecutorService executorService;
 
@@ -44,28 +41,7 @@ public class ReadingTtsStreamService {
             AiTtsProperties properties,
             @Qualifier("ttsStreamingExecutor") ExecutorService executorService
     ) {
-        this(
-                sessionManager,
-                new TtsTextChunker(new TextSegmenter.Settings(
-                        properties.getCommit().getMinLength(),
-                        properties.getCommit().getMaxLength(),
-                        properties.getCommit().getMaxWaitMs(),
-                        properties.getCommit().getSoftPunctuation(),
-                        properties.getCommit().getHardPunctuation()
-                )),
-                properties,
-                executorService
-        );
-    }
-
-    public ReadingTtsStreamService(
-            ReadingTtsSessionManager sessionManager,
-            TtsTextChunker textChunker,
-            AiTtsProperties properties,
-            ExecutorService executorService
-    ) {
         this.sessionManager = sessionManager;
-        this.textChunker = textChunker;
         this.properties = properties;
         this.executorService = executorService;
     }
@@ -196,17 +172,17 @@ public class ReadingTtsStreamService {
         activeSessionId.set(sessionRef.sessionId());
 
         try {
-            List<TextSegment> segments = TtsTextNormalizer.normalize(textChunker.chunk(request.sentence()), request.language());
+            TextSegment segment = TtsTextNormalizer.normalize(
+                    new TextSegment(1, request.sentence().trim()),
+                    request.language()
+            );
             ReadingTtsLogHelper.logPhase(
                     requestId,
                     sessionRef.sessionId(),
                     request.language(),
-                    "text.chunked",
+                    "text.normalized",
                     elapsedMs(startedAtNs),
-                    Map.of(
-                            "segmentCount", segments.size(),
-                            "normalizedLength", totalSegmentLength(segments)
-                    )
+                    Map.of("normalizedLength", segment.text().length())
             );
             TtsUtterance utterance = sessionRef.session().openUtterance(new TtsAudioListener() {
                 @Override
@@ -305,9 +281,7 @@ public class ReadingTtsStreamService {
                     elapsedMs(startedAtNs),
                     Map.of()
             );
-            for (TextSegment segment : segments) {
-                utterance.enqueue(segment);
-            }
+            utterance.enqueue(segment);
             utterance.finish();
             utterance.awaitFinished(UTTERANCE_TIMEOUT);
         } catch (BasicException exception) {
@@ -378,16 +352,6 @@ public class ReadingTtsStreamService {
 
     private String normalizeSessionId(String sessionId) {
         return sessionId == null || sessionId.isBlank() ? null : sessionId;
-    }
-
-    private int totalSegmentLength(List<TextSegment> segments) {
-        int total = 0;
-        for (TextSegment segment : segments) {
-            if (segment != null && segment.text() != null) {
-                total += segment.text().length();
-            }
-        }
-        return total;
     }
 
     private void cancelTask(Future<?> task) {
